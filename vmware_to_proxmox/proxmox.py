@@ -97,7 +97,7 @@ class ProxmoxClient:
         Returns:
             The VMID of the newly created VM.
         """
-        vmid = self.get_next_vmid()
+        vmid = migration_config.proxmox_vmid or self.get_next_vmid()
         node = self.config.node
         storage = migration_config.proxmox_storage
 

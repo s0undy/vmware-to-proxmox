@@ -53,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Proxmox API token value")
 
     # Proxmox VM options
+    parser.add_argument("--proxmox-vmid", type=int, default=None,
+                        help="Proxmox VMID to use (default: next available)")
     parser.add_argument("--proxmox-bridges",
                         help="Comma-separated bridge list for NICs in order "
                              "(e.g. vmbr0,vmbr1). Last bridge reused for extra NICs.")

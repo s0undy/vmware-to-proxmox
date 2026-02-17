@@ -45,6 +45,7 @@ migration:
   vm_name: ""                        # --vm-name              (required)
   migration_datastore: ""            # --migration-datastore  (required)
   proxmox_storage: ""                # --proxmox-storage      (required)
+  proxmox_vmid: 0                    # --proxmox-vmid         (0 = next available)
 
   # NIC bridges — comma-separated, mapped to NICs in order.
   # If fewer bridges than NICs, the last bridge is reused.

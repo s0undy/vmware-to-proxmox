@@ -41,6 +41,7 @@ class MigrationConfig:
     vm_name: str
     migration_datastore: str
     proxmox_storage: str
+    proxmox_vmid: int = 0
     proxmox_bridges: str = "vmbr0"
     max_cores: int = 0
     max_sockets: int = 1
@@ -153,6 +154,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple["AppConfig", dict]
     if not px_storage:
         raise ConfigurationError("--proxmox-storage is required")
 
+    px_vmid = int(_pick(args.proxmox_vmid, mig_yaml.get("proxmox_vmid"), 0))
     px_bridges = args.proxmox_bridges or mig_yaml.get("proxmox_bridges", "vmbr0")
     max_cores = int(_pick(args.max_cores, mig_yaml.get("max_cores"), 0))
     max_sockets = int(_pick(args.max_sockets, mig_yaml.get("max_sockets"), 1))
@@ -204,6 +206,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple["AppConfig", dict]
             vm_name=vm_name,
             migration_datastore=migration_ds,
             proxmox_storage=px_storage,
+            proxmox_vmid=px_vmid,
             proxmox_bridges=px_bridges,
             max_cores=max_cores,
             max_sockets=max_sockets,
