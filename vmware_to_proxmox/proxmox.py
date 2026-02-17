@@ -136,6 +136,7 @@ class ProxmoxClient:
             "scsihw": "virtio-scsi-single",
             "boot": "order=scsi0",
             "agent": "1",
+            "numa": 1,
             "tablet": 0,
             "ide2": "none,media=cdrom",
         }
