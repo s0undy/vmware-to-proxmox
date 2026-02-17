@@ -1,0 +1,70 @@
+# VMware-to-Proxmox migration configuration
+#
+# Every setting here can also be passed as a CLI argument.
+# CLI arguments take precedence over this file.
+#
+# Passwords can also be set via environment variables:
+#   VCENTER_PASSWORD, PROXMOX_PASSWORD, GUEST_PASSWORD
+# If omitted entirely, you will be prompted interactively.
+
+# ---------------------------------------------------------------------------
+# vCenter connection
+# ---------------------------------------------------------------------------
+vcenter:
+  host: "vcenter.example.com"       # --vcenter-host
+  user: "administrator@vsphere.local" # --vcenter-user
+  password: ""                       # --vcenter-password  (or VCENTER_PASSWORD env var)
+  port: 443                          # --vcenter-port
+  insecure: true                     # --vcenter-insecure  (skip SSL verification)
+
+# ---------------------------------------------------------------------------
+# Proxmox connection
+# ---------------------------------------------------------------------------
+proxmox:
+  host: "proxmox.example.com"       # --proxmox-host
+  user: "root@pam"                   # --proxmox-user
+  password: ""                       # --proxmox-password  (or PROXMOX_PASSWORD env var)
+  node: "pve"                        # --proxmox-node
+  port: 8006                         # --proxmox-port
+  verify_ssl: false                  # --proxmox-verify-ssl
+  # Token auth (alternative to password):
+  # token_name: "migrate"            # --proxmox-token-name
+  # token_value: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # --proxmox-token-value
+
+# ---------------------------------------------------------------------------
+# Guest OS credentials (for running scripts inside the VM via VMware Tools)
+# ---------------------------------------------------------------------------
+guest:
+  user: "Administrator"              # --guest-user
+  password: ""                       # --guest-password  (or GUEST_PASSWORD env var)
+
+# ---------------------------------------------------------------------------
+# Migration settings
+# ---------------------------------------------------------------------------
+migration:
+  vm_name: ""                        # --vm-name              (required)
+  migration_datastore: ""            # --migration-datastore  (required)
+  proxmox_storage: ""                # --proxmox-storage      (required)
+
+  # NIC bridges — comma-separated, mapped to NICs in order.
+  # If fewer bridges than NICs, the last bridge is reused.
+  # Example: "vmbr0,vmbr1" with 3 NICs → net0=vmbr0, net1=vmbr1, net2=vmbr1
+  proxmox_bridges: "vmbr0"          # --proxmox-bridges
+
+  # CPU limits
+  max_cores: 0                       # --max-cores    (0 = use vCenter vCPU count as-is)
+  max_sockets: 1                     # --max-sockets  (default: 1)
+
+  # Paths inside the guest (pre-deployed by user):
+  staging_dir: "C:\\TMP\\pveMigration"                                          # --staging-dir
+  virtio_driver_path: "C:\\TMP\\pveMigration\\vioscsi"                          # --virtio-driver-path
+  virtio_tools_path: "C:\\TMP\\pveMigration\\virtio-win-guest-tools.exe"        # --virtio-tools-path
+  export_nic_script: "C:\\TMP\\pveMigration\\exportNicConfig.ps1"               # --export-nic-script
+  vioscsi_script: "C:\\TMP\\pveMigration\\enable-vioscsi-to-load-on-boot.ps1"   # --vioscsi-script
+
+# ---------------------------------------------------------------------------
+# Workflow control
+# ---------------------------------------------------------------------------
+skip_to: 1                           # --skip-to   (resume from step N, 1-6)
+dry_run: false                       # --dry-run   (log actions without executing)
+verbose: false                       # --verbose   (enable debug-level logging)
