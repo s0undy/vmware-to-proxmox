@@ -126,6 +126,7 @@ class ProxmoxClient:
         params = {
             "vmid": vmid,
             "name": vm_config["name"],
+            "machine": "q35",
             "memory": vm_config["memory_mb"],
             "sockets": sockets,
             "cores": cores,
@@ -134,6 +135,9 @@ class ProxmoxClient:
             "ostype": ostype,
             "scsihw": "virtio-scsi-single",
             "boot": "order=scsi0",
+            "agent": "1",
+            "tablet": 0,
+            "ide2": "none,media=cdrom",
         }
 
         # Disks — preserve order from vCenter
@@ -149,7 +153,7 @@ class ProxmoxClient:
 
         # EFI disk when using OVMF
         if bios == "ovmf":
-            params["efidisk0"] = f"{storage}:1"
+            params["efidisk0"] = f"{storage}:1,format=qcow2,efitype=4m,pre-enrolled-keys=1"
 
         try:
             self.api.nodes(node).qemu.create(**params)
