@@ -104,7 +104,7 @@ if ($DriverPath) {
         throw "Could not determine OS folder for Windows version $($osVersion.Major).$($osVersion.Minor) Build $buildNumber"
     }
 
-    $InfPath = Join-Path $DriverPath $osFolder "amd64" "vioscsi.inf"
+    $InfPath = Join-Path (Join-Path (Join-Path $DriverPath $osFolder) "amd64") "vioscsi.inf"
     if (-not (Test-Path $InfPath)) {
         throw "Driver INF not found at expected path: $InfPath"
     }

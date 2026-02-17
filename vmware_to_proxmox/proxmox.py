@@ -11,14 +11,16 @@ from .exceptions import ProxmoxConnectionError, ProxmoxOperationError
 logger = logging.getLogger(__name__)
 
 # Map VMware guestId values to Proxmox ostype values.
+# Valid Proxmox ostypes: other, wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, win11,
+#                        l24, l26, solaris
 GUEST_ID_TO_OSTYPE = {
     # Windows Server
-    "windows9Server64Guest": "w2k16",
-    "windows2019srv_64Guest": "w2k19",
-    "windows2019srvNext_64Guest": "w2k22",
-    "windows2022srvNext_64Guest": "w2k22",
-    "windows2025srv_64Guest": "w2k25",
-    "windows2025srvNext_64Guest": "w2k25",
+    "windows9Server64Guest": "win10",          # Server 2016
+    "windows2019srv_64Guest": "win10",         # Server 2019
+    "windows2019srvNext_64Guest": "win10",     # Server 2022
+    "windows2022srvNext_64Guest": "win11",     # Server 2022
+    "windows2025srv_64Guest": "win11",         # Server 2025
+    "windows2025srvNext_64Guest": "win11",     # Server 2025
     # Windows Desktop
     "windows9_64Guest": "win10",
     "windows11_64Guest": "win11",
