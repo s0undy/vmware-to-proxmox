@@ -29,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="vCenter datastore for staging the migration")
     parser.add_argument("--proxmox-storage",
                         help="Proxmox storage target for VM disks")
+    parser.add_argument("--proxmox-final-storage",
+                        help="Proxmox storage for final disk location (step 9 moves disks here as qcow2)")
 
     # vCenter
     parser.add_argument("--vcenter-host", help="vCenter hostname or IP")
@@ -87,8 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Workflow control
     parser.add_argument(
-        "--skip-to", type=int, default=None, choices=range(1, 8),
-        help="Resume from step N (1-7, default: 1)",
+        "--skip-to", type=int, default=None, choices=range(1, 11),
+        help="Resume from step N (1-10, default: 1)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", default=None,

@@ -1,16 +1,16 @@
-"""Migration orchestrator — ties all seven steps together."""
+"""Migration orchestrator — ties all ten steps together."""
 
 import logging
 
 from .config import AppConfig
-from .exceptions import GuestOperationError, MigrationError
+from .exceptions import GuestOperationError, MigrationError, ProxmoxOperationError
 from .guest_ops import GuestOperations
 from .proxmox import ProxmoxClient
 from .vcenter import VCenterClient
 
 logger = logging.getLogger(__name__)
 
-TOTAL_STEPS = 7
+TOTAL_STEPS = 10
 
 
 class MigrationOrchestrator:
@@ -33,6 +33,8 @@ class MigrationOrchestrator:
         logger.info("  VM:                  %s", self.config.migration.vm_name)
         logger.info("  Migration datastore: %s", self.config.migration.migration_datastore)
         logger.info("  Proxmox storage:     %s", self.config.migration.proxmox_storage)
+        if self.config.migration.proxmox_final_storage:
+            logger.info("  Proxmox final store: %s", self.config.migration.proxmox_final_storage)
         if self.dry_run:
             logger.info("  *** DRY RUN — no changes will be made ***")
         if self.skip_to > 1:
@@ -52,6 +54,9 @@ class MigrationOrchestrator:
             (5, "Install VirtIO guest tools", self._step_5_install_virtio_tools),
             (6, "Shut down VM", self._step_6_shutdown),
             (7, "Rewrite VMDK descriptors", self._step_7_rewrite_vmdk_descriptors),
+            (8, "Start VM in Proxmox", self._step_8_start_vm),
+            (9, "Move disks to final storage", self._step_9_move_disks),
+            (10, "Verify VM on final storage", self._step_10_verify),
         ]
 
         for num, label, fn in steps:
@@ -190,20 +195,8 @@ class MigrationOrchestrator:
         logger.info("  VM is powered off.")
 
     def _step_7_rewrite_vmdk_descriptors(self, vm):
-        # When resuming from this step (skipping step 2), fetch config anew.
-        vm_config = getattr(self, "_vm_config", None)
-        vmid = getattr(self, "_vmid", None)
-
-        if vm_config is None:
-            vm_config = self.vc.get_vm_config(vm)
-
-        if vmid is None:
-            vmid = self.config.migration.proxmox_vmid
-            if not vmid:
-                raise MigrationError(
-                    "Cannot rewrite VMDK descriptors: VMID unknown. "
-                    "Run from step 2, or set proxmox_vmid in config."
-                )
+        vm_config = self._resolve_vm_config(vm)
+        vmid = self._resolve_vmid()
 
         if self.dry_run:
             for i, d in enumerate(vm_config["disks"]):
@@ -218,6 +211,99 @@ class MigrationOrchestrator:
         )
         logger.info("  All VMDK descriptors rewritten.")
 
+    def _step_8_start_vm(self, vm):
+        vmid = self._resolve_vmid()
+
+        if self.dry_run:
+            logger.info("  DRY RUN: would start VMID %d", vmid)
+            return
+
+        self.px.start_vm(vmid)
+        logger.info("  VM %d start command sent.", vmid)
+
+    def _step_9_move_disks(self, vm):
+        vmid = self._resolve_vmid()
+        vm_config = self._resolve_vm_config(vm)
+        final_storage = self.config.migration.proxmox_final_storage
+
+        if not final_storage:
+            raise MigrationError(
+                "Cannot move disks: proxmox_final_storage is not set. "
+                "Set --proxmox-final-storage or proxmox_final_storage in config."
+            )
+
+        # Move data disks one at a time
+        for i, disk in enumerate(vm_config["disks"]):
+            disk_name = f"scsi{i}"
+            if self.dry_run:
+                logger.info("  DRY RUN: would move %s -> %s (qcow2)", disk_name, final_storage)
+                continue
+            self.px.move_disk(vmid, disk_name, final_storage)
+
+        # Move EFI disk if present
+        if vm_config["firmware"] == "efi":
+            if self.dry_run:
+                logger.info("  DRY RUN: would move efidisk0 -> %s (qcow2)", final_storage)
+            else:
+                self.px.move_disk(vmid, "efidisk0", final_storage)
+
+        logger.info("  All disks moved to %s.", final_storage)
+
+    def _step_10_verify(self, vm):
+        vmid = self._resolve_vmid()
+        vm_config = self._resolve_vm_config(vm)
+        final_storage = self.config.migration.proxmox_final_storage
+
+        if self.dry_run:
+            logger.info("  DRY RUN: would verify VMID %d is running on %s", vmid, final_storage)
+            return
+
+        # Verify VM is running
+        status = self.px.get_vm_status(vmid)
+        logger.info("  VM %d status: %s", vmid, status)
+        if status != "running":
+            raise ProxmoxOperationError(
+                f"VM {vmid} is not running (status: {status})"
+            )
+
+        # Verify all disks are on the final storage
+        px_config = self.px.get_vm_config_proxmox(vmid)
+        disk_keys = [f"scsi{i}" for i in range(len(vm_config["disks"]))]
+        if vm_config["firmware"] == "efi":
+            disk_keys.append("efidisk0")
+
+        for key in disk_keys:
+            value = px_config.get(key, "")
+            if not value.startswith(f"{final_storage}:"):
+                raise ProxmoxOperationError(
+                    f"Disk {key} is not on final storage {final_storage}: {value}"
+                )
+            logger.info("  %s: %s", key, value)
+
+        logger.info("  Verification passed — all disks on %s, VM running.", final_storage)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_vmid(self) -> int:
+        """Return the VMID from step 2 or from config."""
+        vmid = getattr(self, "_vmid", None)
+        if vmid is None:
+            vmid = self.config.migration.proxmox_vmid
+            if not vmid:
+                raise MigrationError(
+                    "VMID unknown. Run from step 2, or set proxmox_vmid in config."
+                )
+        return vmid
+
+    def _resolve_vm_config(self, vm):
+        """Return the vCenter vm_config from step 2 or fetch it fresh."""
+        vm_config = getattr(self, "_vm_config", None)
+        if vm_config is None:
+            vm_config = self.vc.get_vm_config(vm)
+        return vm_config
+
     # ------------------------------------------------------------------
     # Post-migration guidance
     # ------------------------------------------------------------------
@@ -229,7 +315,6 @@ class MigrationOrchestrator:
         logger.info("=" * 60)
         logger.info("")
         logger.info("Remaining manual steps:")
-        logger.info("  1. Boot the VM on Proxmox")
-        logger.info("  2. Run importNicConfig.ps1 to restore network configuration")
-        logger.info("  3. Run purge-vmware-tools.ps1 -Force to remove VMware Tools")
-        logger.info("  4. Reboot the VM")
+        logger.info("  1. Run importNicConfig.ps1 to restore network configuration")
+        logger.info("  2. Run purge-vmware-tools.ps1 -Force to remove VMware Tools")
+        logger.info("  3. Reboot the VM")

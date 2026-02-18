@@ -43,6 +43,7 @@ class MigrationConfig:
     vm_name: str
     migration_datastore: str
     proxmox_storage: str
+    proxmox_final_storage: str = ""
     proxmox_vmid: int = 0
     proxmox_bridges: str = "vmbr0"
     max_cores: int = 0
@@ -180,6 +181,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     # ------------------------------------------------------------------
     migration_ds = args.migration_datastore or mig_yaml.get("migration_datastore")
     px_storage = args.proxmox_storage or mig_yaml.get("proxmox_storage")
+    px_final_storage = args.proxmox_final_storage or mig_yaml.get("proxmox_final_storage", "")
     if not migration_ds:
         raise ConfigurationError("--migration-datastore is required")
     if not px_storage:
@@ -232,6 +234,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         vm_name="",
         migration_datastore=migration_ds,
         proxmox_storage=px_storage,
+        proxmox_final_storage=px_final_storage,
         proxmox_vmid=0,
         proxmox_bridges=px_bridges,
         max_cores=max_cores,

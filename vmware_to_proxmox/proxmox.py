@@ -3,6 +3,7 @@
 import logging
 import math
 import re
+import time
 
 import paramiko
 from proxmoxer import ProxmoxAPI
@@ -154,7 +155,7 @@ class ProxmoxClient:
         bridges = [b.strip() for b in migration_config.proxmox_bridges.split(",")]
         for i, nic in enumerate(vm_config["nics"]):
             bridge = bridges[min(i, len(bridges) - 1)]
-            params[f"net{i}"] = f"virtio,bridge={bridge}"
+            params[f"net{i}"] = f"virtio,bridge={bridge},link_down=1"
 
         # EFI disk when using OVMF
         if bios == "ovmf":
@@ -169,6 +170,72 @@ class ProxmoxClient:
 
         logger.info("  Created Proxmox VM — VMID: %d", vmid)
         return vmid
+
+    # ------------------------------------------------------------------
+    # VM lifecycle & disk operations
+    # ------------------------------------------------------------------
+
+    def start_vm(self, vmid: int) -> None:
+        """Start a Proxmox VM."""
+        node = self.config.node
+        try:
+            self.api.nodes(node).qemu(vmid).status.start.post()
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to start VM {vmid}: {exc}"
+            ) from exc
+        logger.info("  Start command sent for VMID %d", vmid)
+
+    def wait_for_task(self, task_upid: str, timeout: int = 3600) -> None:
+        """Poll a Proxmox task until it completes or times out."""
+        node = self.config.node
+        start = time.monotonic()
+        while True:
+            elapsed = time.monotonic() - start
+            if elapsed > timeout:
+                raise ProxmoxOperationError(
+                    f"Task timed out after {timeout}s: {task_upid}"
+                )
+            status = self.api.nodes(node).tasks(task_upid).status.get()
+            if status.get("status") == "stopped":
+                if status.get("exitstatus") != "OK":
+                    raise ProxmoxOperationError(
+                        f"Task failed ({status.get('exitstatus')}): {task_upid}"
+                    )
+                return
+            time.sleep(3)
+
+    def move_disk(self, vmid: int, disk: str, target_storage: str) -> None:
+        """Move a VM disk to another storage, converting to qcow2.
+
+        The source disk is kept (delete=0).
+        """
+        node = self.config.node
+        logger.info("    Moving %s -> %s (qcow2) ...", disk, target_storage)
+        try:
+            upid = self.api.nodes(node).qemu(vmid).move_disk.post(
+                disk=disk,
+                storage=target_storage,
+                format="qcow2",
+                delete=0,
+            )
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to move disk {disk} for VM {vmid}: {exc}"
+            ) from exc
+        self.wait_for_task(upid)
+        logger.info("    %s move complete.", disk)
+
+    def get_vm_config_proxmox(self, vmid: int) -> dict:
+        """Return the current Proxmox VM configuration."""
+        node = self.config.node
+        return self.api.nodes(node).qemu(vmid).config.get()
+
+    def get_vm_status(self, vmid: int) -> str:
+        """Return the current power status of a Proxmox VM (e.g. 'running')."""
+        node = self.config.node
+        data = self.api.nodes(node).qemu(vmid).status.current.get()
+        return data.get("status", "unknown")
 
     # ------------------------------------------------------------------
     # SSH transport (for file operations on the Proxmox node)

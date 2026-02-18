@@ -45,8 +45,9 @@ guest:
 # Migration settings
 # ---------------------------------------------------------------------------
 migration:
-  migration_datastore: ""            # --migration-datastore  (required)
-  proxmox_storage: ""                # --proxmox-storage      (required)
+  migration_datastore: ""            # --migration-datastore       (required)
+  proxmox_storage: ""                # --proxmox-storage          (required)
+  proxmox_final_storage: ""          # --proxmox-final-storage    (step 9: move disks here as qcow2)
 
   # NIC bridges — comma-separated, mapped to NICs in order.
   # If fewer bridges than NICs, the last bridge is reused.
@@ -93,7 +94,7 @@ migration:
 # ---------------------------------------------------------------------------
 # Workflow control
 # ---------------------------------------------------------------------------
-skip_to: 1                           # --skip-to    (resume from step N, 1-7)
+skip_to: 1                           # --skip-to    (resume from step N, 1-10)
 dry_run: false                       # --dry-run    (log actions without executing)
 parallel: false                      # --parallel   (migrate all VMs concurrently)
 verbose: false                       # --verbose    (enable debug-level logging)
