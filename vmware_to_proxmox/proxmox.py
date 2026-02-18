@@ -226,6 +226,145 @@ class ProxmoxClient:
         self.wait_for_task(upid)
         logger.info("    %s move complete.", disk)
 
+    def reboot_vm(self, vmid: int) -> None:
+        """Reboot a Proxmox VM via ACPI signal."""
+        node = self.config.node
+        try:
+            self.api.nodes(node).qemu(vmid).status.reboot.post()
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to reboot VM {vmid}: {exc}"
+            ) from exc
+        logger.info("  Reboot command sent for VMID %d", vmid)
+
+    def mount_iso(self, vmid: int, storage: str, iso_filename: str) -> None:
+        """Mount an ISO image on the VM's IDE CD/DVD drive."""
+        node = self.config.node
+        ide0_value = f"{storage}:iso/{iso_filename},media=cdrom"
+        try:
+            self.api.nodes(node).qemu(vmid).config.put(ide0=ide0_value)
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to mount ISO on VM {vmid}: {exc}"
+            ) from exc
+        logger.info("  Mounted ISO: %s", ide0_value)
+
+    def unmount_iso(self, vmid: int) -> None:
+        """Unmount the ISO from the VM's IDE CD/DVD drive (keep the drive)."""
+        node = self.config.node
+        try:
+            self.api.nodes(node).qemu(vmid).config.put(ide0="none,media=cdrom")
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to unmount ISO on VM {vmid}: {exc}"
+            ) from exc
+        logger.info("  ISO unmounted (ide0 reset to empty).")
+
+    def wait_for_guest_agent(self, vmid: int, timeout: int = 300) -> None:
+        """Block until the QEMU guest agent responds to a ping."""
+        node = self.config.node
+        start = time.monotonic()
+        while True:
+            elapsed = time.monotonic() - start
+            if elapsed > timeout:
+                raise ProxmoxOperationError(
+                    f"QEMU guest agent not responding after {timeout}s for VM {vmid}"
+                )
+            try:
+                self.api.nodes(node).qemu(vmid).agent.ping.post()
+                return
+            except Exception:
+                time.sleep(5)
+
+    def guest_exec(
+        self,
+        vmid: int,
+        command: str,
+        arguments: list[str] | None = None,
+        timeout: int = 600,
+    ) -> dict:
+        """Execute a command inside the guest via QEMU guest agent.
+
+        Args:
+            vmid: Proxmox VM ID.
+            command: Path to the executable inside the guest.
+            arguments: List of command-line arguments.
+            timeout: Max seconds to wait for completion.
+
+        Returns:
+            Dict with 'exitcode', 'out-data', 'err-data'.
+        """
+        node = self.config.node
+        # Proxmox 8+ expects command as a list: [executable, arg1, arg2, ...]
+        cmd_list = [command] + (arguments or [])
+
+        try:
+            result = self.api.nodes(node).qemu(vmid).agent("exec").post(command=cmd_list)
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to execute command in guest VM {vmid}: {exc}"
+            ) from exc
+
+        pid = result.get("pid")
+        if pid is None:
+            raise ProxmoxOperationError(
+                f"No PID returned from guest exec on VM {vmid}"
+            )
+
+        logger.info("  Guest exec PID %s: %s", pid, command)
+
+        # Poll for completion
+        start = time.monotonic()
+        while True:
+            elapsed = time.monotonic() - start
+            if elapsed > timeout:
+                raise ProxmoxOperationError(
+                    f"Guest process PID {pid} did not finish within {timeout}s on VM {vmid}"
+                )
+            try:
+                status = self.api.nodes(node).qemu(vmid).agent("exec-status").get(pid=pid)
+            except Exception:
+                time.sleep(5)
+                continue
+
+            if status.get("exited"):
+                exitcode = status.get("exitcode", -1)
+                out_data = status.get("out-data", "")
+                err_data = status.get("err-data", "")
+                logger.info("  Guest exec PID %s exited with code %d", pid, exitcode)
+                return {"exitcode": exitcode, "out-data": out_data, "err-data": err_data}
+            time.sleep(5)
+
+    def set_nic_link_state(self, vmid: int, nic_key: str, link_down: bool) -> None:
+        """Update the link state of a VM NIC.
+
+        Args:
+            vmid: Proxmox VM ID.
+            nic_key: NIC config key (e.g. 'net0').
+            link_down: True to disable link, False to enable.
+        """
+        node = self.config.node
+        config = self.get_vm_config_proxmox(vmid)
+        current_value = config.get(nic_key, "")
+        if not current_value:
+            logger.warning("  NIC %s not found in VM %d config, skipping.", nic_key, vmid)
+            return
+
+        if link_down:
+            new_value = re.sub(r"link_down=\d", "link_down=1", current_value)
+            if "link_down=" not in new_value:
+                new_value += ",link_down=1"
+        else:
+            new_value = re.sub(r",?link_down=\d", "", current_value)
+
+        try:
+            self.api.nodes(node).qemu(vmid).config.put(**{nic_key: new_value})
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to update {nic_key} link state on VM {vmid}: {exc}"
+            ) from exc
+        logger.info("  %s link_down=%s -> %s", nic_key, link_down, new_value)
+
     def get_vm_config_proxmox(self, vmid: int) -> dict:
         """Return the current Proxmox VM configuration."""
         node = self.config.node

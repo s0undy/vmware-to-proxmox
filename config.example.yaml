@@ -65,6 +65,12 @@ migration:
   virtio_tools_path: "C:\\TMP\\pveMigration\\virtio-win-guest-tools.exe"        # --virtio-tools-path
   export_nic_script: "C:\\TMP\\pveMigration\\exportNicConfig.ps1"               # --export-nic-script
   vioscsi_script: "C:\\TMP\\pveMigration\\enable-vioscsi-to-load-on-boot.ps1"   # --vioscsi-script
+  purge_vmware_script: "C:\\TMP\\pveMigration\\purge-vmware-tools.ps1"        # --purge-vmware-script
+  import_nic_script: "C:\\TMP\\pveMigration\\importNicConfig.ps1"             # --import-nic-script
+
+  # VirtIO ISO settings (for step 11 — install VirtIO drivers from mounted ISO):
+  virtio_iso_storage: "local"                                                  # --virtio-iso-storage
+  virtio_iso_filename: "virtio-win-0.1.271-1.iso"                             # --virtio-iso-filename
 
   # ---------------------------------------------------------------------------
   # VM list — specify one or more VMs to migrate.
@@ -97,7 +103,7 @@ migration:
 # ---------------------------------------------------------------------------
 # Workflow control
 # ---------------------------------------------------------------------------
-skip_to: 1                           # --skip-to    (resume from step N, 1-10)
+skip_to: 1                           # --skip-to    (resume from step N, 1-14)
 dry_run: false                       # --dry-run    (log actions without executing)
 parallel: false                      # --parallel   (migrate all VMs concurrently)
 verbose: false                       # --verbose    (enable debug-level logging)

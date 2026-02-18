@@ -54,6 +54,10 @@ class MigrationConfig:
     virtio_tools_path: str = r"C:\TMP\pveMigration\virtio-win-guest-tools.exe"
     export_nic_script: str = r"C:\TMP\pveMigration\exportNicConfig.ps1"
     vioscsi_script: str = r"C:\TMP\pveMigration\enable-vioscsi-to-load-on-boot.ps1"
+    virtio_iso_storage: str = "local"
+    virtio_iso_filename: str = "virtio-win-0.1.271-1.iso"
+    purge_vmware_script: str = r"C:\TMP\pveMigration\purge-vmware-tools.ps1"
+    import_nic_script: str = r"C:\TMP\pveMigration\importNicConfig.ps1"
 
 
 _MIGRATION_FIELD_NAMES = {f.name for f in fields(MigrationConfig)}
@@ -209,6 +213,17 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     vioscsi_script = (args.vioscsi_script
                       or mig_yaml.get("vioscsi_script",
                                       r"C:\TMP\pveMigration\enable-vioscsi-to-load-on-boot.ps1"))
+    virtio_iso_storage = (args.virtio_iso_storage
+                          or mig_yaml.get("virtio_iso_storage", "local"))
+    virtio_iso_filename = (args.virtio_iso_filename
+                           or mig_yaml.get("virtio_iso_filename",
+                                           "virtio-win-0.1.271-1.iso"))
+    purge_vmware_script = (args.purge_vmware_script
+                           or mig_yaml.get("purge_vmware_script",
+                                           r"C:\TMP\pveMigration\purge-vmware-tools.ps1"))
+    import_nic_script = (args.import_nic_script
+                         or mig_yaml.get("import_nic_script",
+                                         r"C:\TMP\pveMigration\importNicConfig.ps1"))
 
     # ------------------------------------------------------------------
     # Build per-VM configs
@@ -249,6 +264,10 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         virtio_tools_path=virtio_tools_path,
         export_nic_script=export_nic_script,
         vioscsi_script=vioscsi_script,
+        virtio_iso_storage=virtio_iso_storage,
+        virtio_iso_filename=virtio_iso_filename,
+        purge_vmware_script=purge_vmware_script,
+        import_nic_script=import_nic_script,
     )
 
     app_configs: list[AppConfig] = []

@@ -11,7 +11,7 @@ from .vcenter import VCenterClient
 
 logger = logging.getLogger(__name__)
 
-TOTAL_STEPS = 10
+TOTAL_STEPS = 14
 
 
 class MigrationOrchestrator:
@@ -58,6 +58,10 @@ class MigrationOrchestrator:
             (8, "Start VM in Proxmox", self._step_8_start_vm),
             (9, "Move disks to final storage", self._step_9_move_disks),
             (10, "Verify VM on final storage", self._step_10_verify),
+            (11, "Install VirtIO drivers from ISO", self._step_11_install_virtio_drivers),
+            (12, "Purge VMware Tools", self._step_12_purge_vmware_tools),
+            (13, "Restore NIC configuration", self._step_13_import_nic_config),
+            (14, "Enable NICs and final reboot", self._step_14_enable_nics),
         ]
 
         for num, label, fn in steps:
@@ -305,6 +309,155 @@ class MigrationOrchestrator:
 
         logger.info("  Verification passed — all disks on %s, VM running.", final_storage)
 
+    def _step_11_install_virtio_drivers(self, vm):
+        vmid = self._resolve_vmid()
+        iso_storage = self.config.migration.virtio_iso_storage
+        iso_filename = self.config.migration.virtio_iso_filename
+
+        if self.dry_run:
+            logger.info("  DRY RUN: would mount %s:iso/%s on VMID %d and install VirtIO drivers",
+                        iso_storage, iso_filename, vmid)
+            return
+
+        # Mount the VirtIO ISO
+        self.px.mount_iso(vmid, iso_storage, iso_filename)
+        logger.info("  Waiting 5s for ISO to become available ...")
+        time.sleep(5)
+
+        # Wait for guest agent
+        logger.info("  Waiting for QEMU guest agent ...")
+        self.px.wait_for_guest_agent(vmid)
+        logger.info("  Guest agent is responding.")
+
+        # Discover the drive letter of the mounted ISO
+        logger.info("  Discovering ISO drive letter ...")
+        result = self.px.guest_exec(
+            vmid,
+            command="powershell",
+            arguments=["-Command",
+                       "(Get-Volume | Where-Object {$_.FileSystemLabel -like 'virtio-win*'}).DriveLetter"],
+            timeout=60,
+        )
+        if result["exitcode"] != 0:
+            raise ProxmoxOperationError(
+                f"Failed to discover ISO drive letter: exit code {result['exitcode']}, "
+                f"stderr: {result.get('err-data', '')}"
+            )
+        drive_letter = result.get("out-data", "").strip()
+        if not drive_letter or len(drive_letter) != 1:
+            raise ProxmoxOperationError(
+                f"Unexpected drive letter result: '{drive_letter}'"
+            )
+        logger.info("  VirtIO ISO mounted on drive %s:", drive_letter)
+
+        # Install the full VirtIO driver package via msiexec
+        msi_path = f"{drive_letter}:\\virtio-win-gt-x64.msi"
+        logger.info("  Installing VirtIO drivers from %s ...", msi_path)
+        result = self.px.guest_exec(
+            vmid,
+            command="msiexec",
+            arguments=["/i", msi_path, "/quiet", "/qn", "/norestart"],
+            timeout=600,
+        )
+        if result["exitcode"] != 0:
+            raise ProxmoxOperationError(
+                f"msiexec failed with exit code {result['exitcode']}: "
+                f"{result.get('err-data', '')}"
+            )
+        logger.info("  VirtIO driver package installed.")
+
+        logger.info("  Waiting 20s before reboot ...")
+        time.sleep(20)
+        self.px.reboot_vm(vmid)
+        logger.info("  Waiting 20s for VM to start up ...")
+        time.sleep(20)
+
+    def _step_12_purge_vmware_tools(self, vm):
+        vmid = self._resolve_vmid()
+        script = self.config.migration.purge_vmware_script
+
+        if self.dry_run:
+            logger.info("  DRY RUN: would run %s -Force on VMID %d", script, vmid)
+            return
+
+        logger.info("  Waiting for QEMU guest agent ...")
+        self.px.wait_for_guest_agent(vmid)
+        logger.info("  Guest agent is responding.")
+
+        logger.info("  Running purge-vmware-tools.ps1 -Force ...")
+        result = self.px.guest_exec(
+            vmid,
+            command="powershell",
+            arguments=["-ExecutionPolicy", "Bypass", "-File", script, "-Force"],
+            timeout=600,
+        )
+        if result["exitcode"] != 0:
+            raise ProxmoxOperationError(
+                f"purge-vmware-tools.ps1 failed with exit code {result['exitcode']}: "
+                f"{result.get('err-data', '')}"
+            )
+        logger.info("  VMware Tools purged.")
+
+        logger.info("  Waiting 10s before reboot ...")
+        time.sleep(10)
+        self.px.reboot_vm(vmid)
+        logger.info("  Waiting 20s for VM to start up ...")
+        time.sleep(20)
+
+    def _step_13_import_nic_config(self, vm):
+        vmid = self._resolve_vmid()
+        script = self.config.migration.import_nic_script
+
+        if self.dry_run:
+            logger.info("  DRY RUN: would run %s on VMID %d", script, vmid)
+            return
+
+        logger.info("  Waiting for QEMU guest agent ...")
+        self.px.wait_for_guest_agent(vmid)
+        logger.info("  Guest agent is responding.")
+
+        logger.info("  Running importNicConfig.ps1 ...")
+        result = self.px.guest_exec(
+            vmid,
+            command="powershell",
+            arguments=["-ExecutionPolicy", "Bypass", "-File", script],
+            timeout=600,
+        )
+        if result["exitcode"] != 0:
+            raise ProxmoxOperationError(
+                f"importNicConfig.ps1 failed with exit code {result['exitcode']}: "
+                f"{result.get('err-data', '')}"
+            )
+        logger.info("  NIC configuration restored.")
+
+        logger.info("  Waiting 5s before reboot ...")
+        time.sleep(5)
+        self.px.reboot_vm(vmid)
+        logger.info("  Waiting 20s for VM to start up ...")
+        time.sleep(20)
+
+    def _step_14_enable_nics(self, vm):
+        vmid = self._resolve_vmid()
+
+        if self.dry_run:
+            logger.info("  DRY RUN: would unmount ISO, enable all NICs, and reboot VMID %d", vmid)
+            return
+
+        # Unmount the VirtIO ISO
+        self.px.unmount_iso(vmid)
+
+        # Enable all NICs (set link_down=0)
+        px_config = self.px.get_vm_config_proxmox(vmid)
+        nic_keys = sorted(k for k in px_config if k.startswith("net") and k[3:].isdigit())
+        for nic_key in nic_keys:
+            logger.info("  Enabling %s ...", nic_key)
+            self.px.set_nic_link_state(vmid, nic_key, link_down=False)
+        logger.info("  All NICs enabled.")
+
+        # Final reboot
+        self.px.reboot_vm(vmid)
+        logger.info("  Final reboot initiated.")
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -334,10 +487,11 @@ class MigrationOrchestrator:
     def _print_next_steps(self):
         logger.info("")
         logger.info("=" * 60)
-        logger.info("AUTOMATED STEPS COMPLETE")
+        logger.info("MIGRATION COMPLETE")
         logger.info("=" * 60)
         logger.info("")
-        logger.info("Remaining manual steps:")
-        logger.info("  1. Run importNicConfig.ps1 to restore network configuration")
-        logger.info("  2. Run purge-vmware-tools.ps1 -Force to remove VMware Tools")
-        logger.info("  3. Reboot the VM")
+        logger.info("The VM has been fully migrated to Proxmox.")
+        logger.info("  - VirtIO drivers installed")
+        logger.info("  - VMware Tools removed")
+        logger.info("  - Network configuration restored")
+        logger.info("  - All NICs enabled")

@@ -91,11 +91,19 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Path to exportNicConfig.ps1 inside the guest")
     parser.add_argument("--vioscsi-script",
                         help="Path to enable-vioscsi-to-load-on-boot.ps1 inside the guest")
+    parser.add_argument("--virtio-iso-storage",
+                        help="Proxmox storage containing the VirtIO ISO (default: local)")
+    parser.add_argument("--virtio-iso-filename",
+                        help="VirtIO ISO filename (default: virtio-win-0.1.271-1.iso)")
+    parser.add_argument("--purge-vmware-script",
+                        help="Path to purge-vmware-tools.ps1 inside the guest")
+    parser.add_argument("--import-nic-script",
+                        help="Path to importNicConfig.ps1 inside the guest")
 
     # Workflow control
     parser.add_argument(
-        "--skip-to", type=int, default=None, choices=range(1, 11),
-        help="Resume from step N (1-10, default: 1)",
+        "--skip-to", type=int, default=None, choices=range(1, 15),
+        help="Resume from step N (1-14, default: 1)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", default=None,
