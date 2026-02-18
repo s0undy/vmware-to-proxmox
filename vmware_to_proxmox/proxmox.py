@@ -18,7 +18,7 @@ GUEST_ID_TO_OSTYPE = {
     "windows9Server64Guest": "win10",          # Server 2016
     "windows2019srv_64Guest": "win10",         # Server 2019
     "windows2019srvNext_64Guest": "win10",     # Server 2022
-    "windows2022srvNext_64Guest": "win11",     # Server 2022
+    "windows2022srvNext_64Guest": "win11",     # Server 2025 (vNext of 2022)
     "windows2025srv_64Guest": "win11",         # Server 2025
     "windows2025srvNext_64Guest": "win11",     # Server 2025
     # Windows Desktop
@@ -39,6 +39,7 @@ GUEST_ID_TO_OSTYPE = {
 NO_NESTED_VIRT_GUEST_IDS = {
     "windows11_64Guest",
     "windows12_64Guest",
+    "windows2022srvNext_64Guest",
     "windows2025srv_64Guest",
     "windows2025srvNext_64Guest",
 }
@@ -138,7 +139,7 @@ class ProxmoxClient:
             "agent": "1",
             "numa": 1,
             "tablet": 0,
-            "ide2": "none,media=cdrom",
+            "ide0": "none,media=cdrom",
         }
 
         # Disks — preserve order from vCenter

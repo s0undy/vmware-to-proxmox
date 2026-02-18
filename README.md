@@ -51,7 +51,43 @@ Useful options:
 |---|---|
 | `--dry-run` | Log what would happen without making changes |
 | `--skip-to N` | Resume from step N (1-6) |
+| `--parallel` | Migrate all VMs concurrently |
 | `--verbose` | Debug-level logging |
+
+## Migrating multiple VMs
+
+Add a `vms:` list under `migration:` in your config file. Shared settings (datastore, storage, paths, etc.) go at the top of the `migration:` block; any field can be overridden per VM.
+
+```yaml
+migration:
+  migration_datastore: "shared-ds"
+  proxmox_storage: "local-lvm"
+  proxmox_bridges: "vmbr0"      # default bridge for all VMs
+
+  vms:
+    - vm_name: "web-server"
+      proxmox_vmid: 200
+      proxmox_bridges: "vmbr0"
+    - vm_name: "db-server"
+      proxmox_vmid: 201
+      proxmox_bridges: "vmbr1"  # different bridge
+      max_cores: 4               # different CPU topology
+      max_sockets: 2
+```
+
+By default the VMs are migrated **sequentially** (one after the other). To migrate them all at the same time, set `parallel: true` in your config or pass `--parallel`:
+
+```bash
+python migrate.py --parallel
+```
+
+In sequential mode, a failure on one VM is logged and the tool continues with the remaining VMs. In parallel mode, all VMs start simultaneously and any failures are reported at the end.
+
+To migrate a single VM via CLI (overrides `vms:` in the config):
+
+```bash
+python migrate.py --vm-name "my-vm"
+```
 
 ## Post-migration (manual)
 

@@ -3,6 +3,7 @@
 import argparse
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import AppConfig, load_config
 from .exceptions import ConfigurationError, MigrationError
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="migrate",
-        description="Migrate a Windows VM from VMware vCenter to Proxmox VE",
+        description="Migrate Windows VMs from VMware vCenter to Proxmox VE",
     )
 
     parser.add_argument(
@@ -23,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # Migration targets
-    parser.add_argument("--vm-name", help="Name of the VM to migrate")
+    parser.add_argument("--vm-name", help="Name of the VM to migrate (overrides migration.vms)")
     parser.add_argument("--migration-datastore",
                         help="vCenter datastore for staging the migration")
     parser.add_argument("--proxmox-storage",
@@ -90,6 +91,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Log what would happen without making any changes",
     )
     parser.add_argument(
+        "--parallel", action="store_true", default=None,
+        help="Migrate all VMs concurrently (default: sequential)",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="store_true", default=None,
         help="Enable debug-level logging",
     )
@@ -116,6 +121,44 @@ def setup_logging(verbose: bool = False):
     logging.getLogger("requests").setLevel(logging.WARNING)
 
 
+def _run_sequential(orchestrators: list[MigrationOrchestrator]) -> list[str]:
+    """Run migrations one at a time; return list of failed VM names."""
+    failures = []
+    for orch in orchestrators:
+        try:
+            orch.run()
+        except MigrationError as exc:
+            logger.error("")
+            logger.error("MIGRATION FAILED [%s]: %s", orch.config.migration.vm_name, exc)
+            logger.error(
+                "You can resume with:  python migrate.py --vm-name %s --skip-to <step>",
+                orch.config.migration.vm_name,
+            )
+            failures.append(orch.config.migration.vm_name)
+    return failures
+
+
+def _run_parallel(orchestrators: list[MigrationOrchestrator]) -> list[str]:
+    """Run all migrations concurrently; return list of failed VM names."""
+    failures = []
+    with ThreadPoolExecutor(max_workers=len(orchestrators)) as executor:
+        future_to_orch = {executor.submit(orch.run): orch for orch in orchestrators}
+        for future in as_completed(future_to_orch):
+            orch = future_to_orch[future]
+            vm_name = orch.config.migration.vm_name
+            try:
+                future.result()
+            except MigrationError as exc:
+                logger.error("")
+                logger.error("MIGRATION FAILED [%s]: %s", vm_name, exc)
+                logger.error(
+                    "You can resume with:  python migrate.py --vm-name %s --skip-to <step>",
+                    vm_name,
+                )
+                failures.append(vm_name)
+    return failures
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -130,24 +173,27 @@ def main():
     setup_logging(verbose=verbose)
 
     try:
-        config, runtime = load_config(args, yaml_data)
+        configs, runtime = load_config(args, yaml_data)
     except ConfigurationError as exc:
         logger.error("Configuration error: %s", exc)
         sys.exit(1)
 
-    orchestrator = MigrationOrchestrator(
-        config,
-        skip_to=runtime["skip_to"],
-        dry_run=runtime["dry_run"],
-    )
+    orchestrators = [
+        MigrationOrchestrator(cfg, skip_to=runtime["skip_to"], dry_run=runtime["dry_run"])
+        for cfg in configs
+    ]
 
     try:
-        orchestrator.run()
-    except MigrationError as exc:
-        logger.error("")
-        logger.error("MIGRATION FAILED: %s", exc)
-        logger.error("You can resume with:  python migrate.py --skip-to <step>")
-        sys.exit(1)
+        if runtime["parallel"] and len(orchestrators) > 1:
+            logger.info("Running %d migrations in parallel.", len(orchestrators))
+            failures = _run_parallel(orchestrators)
+        else:
+            failures = _run_sequential(orchestrators)
     except KeyboardInterrupt:
         logger.warning("\nInterrupted by user.")
         sys.exit(130)
+
+    if failures:
+        logger.error("")
+        logger.error("FAILED: %s", ", ".join(failures))
+        sys.exit(1)

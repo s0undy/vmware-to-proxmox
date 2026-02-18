@@ -2,7 +2,7 @@
 
 import getpass
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 
 import yaml
 
@@ -52,6 +52,9 @@ class MigrationConfig:
     vioscsi_script: str = r"C:\TMP\pveMigration\enable-vioscsi-to-load-on-boot.ps1"
 
 
+_MIGRATION_FIELD_NAMES = {f.name for f in fields(MigrationConfig)}
+
+
 @dataclass
 class AppConfig:
     vcenter: VCenterConfig
@@ -77,12 +80,12 @@ def _pick(cli_value, yaml_value, default):
     return default
 
 
-def load_config(args, yaml_data: dict | None = None) -> tuple["AppConfig", dict]:
-    """Build AppConfig by merging YAML, CLI arguments, and env vars.
+def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"], dict]:
+    """Build a list of AppConfig (one per VM) by merging YAML, CLI arguments, and env vars.
 
     Returns:
-        A tuple of (AppConfig, runtime_dict) where runtime_dict contains
-        workflow flags: skip_to, dry_run, verbose.
+        A tuple of (list[AppConfig], runtime_dict) where runtime_dict contains
+        workflow flags: skip_to, dry_run, verbose, parallel.
     """
     if yaml_data is None:
         yaml_data = {}
@@ -142,19 +145,40 @@ def load_config(args, yaml_data: dict | None = None) -> tuple["AppConfig", dict]
     )
 
     # ------------------------------------------------------------------
-    # Migration
+    # Shared infrastructure config (same for all VMs)
     # ------------------------------------------------------------------
-    vm_name = args.vm_name or mig_yaml.get("vm_name")
+    vcenter_config = VCenterConfig(
+        host=vc_host,
+        user=vc_user,
+        password=vc_password,
+        port=int(vc_port),
+        insecure=bool(vc_insecure),
+    )
+    proxmox_config = ProxmoxConfig(
+        host=px_host,
+        user=px_user,
+        node=px_node,
+        password=px_password,
+        token_name=px_token_name,
+        token_value=px_token_value,
+        port=int(px_port),
+        verify_ssl=bool(px_verify_ssl),
+    )
+    guest_config = GuestConfig(
+        user=guest_user,
+        password=guest_password,
+    )
+
+    # ------------------------------------------------------------------
+    # Migration — shared template (defaults for all VMs)
+    # ------------------------------------------------------------------
     migration_ds = args.migration_datastore or mig_yaml.get("migration_datastore")
     px_storage = args.proxmox_storage or mig_yaml.get("proxmox_storage")
-    if not vm_name:
-        raise ConfigurationError("--vm-name is required")
     if not migration_ds:
         raise ConfigurationError("--migration-datastore is required")
     if not px_storage:
         raise ConfigurationError("--proxmox-storage is required")
 
-    px_vmid = int(_pick(args.proxmox_vmid, mig_yaml.get("proxmox_vmid"), 0))
     px_bridges = args.proxmox_bridges or mig_yaml.get("proxmox_bridges", "vmbr0")
     max_cores = int(_pick(args.max_cores, mig_yaml.get("max_cores"), 0))
     max_sockets = int(_pick(args.max_sockets, mig_yaml.get("max_sockets"), 1))
@@ -175,52 +199,75 @@ def load_config(args, yaml_data: dict | None = None) -> tuple["AppConfig", dict]
                                       r"C:\TMP\pveMigration\enable-vioscsi-to-load-on-boot.ps1"))
 
     # ------------------------------------------------------------------
+    # Build per-VM configs
+    # ------------------------------------------------------------------
+    vms_yaml = mig_yaml.get("vms")
+    cli_vm_name = args.vm_name
+    cli_vmid = args.proxmox_vmid
+
+    if cli_vm_name:
+        # CLI --vm-name always selects a single VM, overriding any vms: list.
+        vm_targets = [{"vm_name": cli_vm_name, "proxmox_vmid": cli_vmid or 0}]
+    elif vms_yaml:
+        # Multi-VM from YAML.
+        vm_targets = vms_yaml
+    else:
+        # Backward-compatible single vm_name from YAML.
+        single_name = mig_yaml.get("vm_name")
+        if not single_name:
+            raise ConfigurationError(
+                "Specify at least one VM: set migration.vm_name, migration.vms, or --vm-name"
+            )
+        single_vmid = int(_pick(None, mig_yaml.get("proxmox_vmid"), 0))
+        vm_targets = [{"vm_name": single_name, "proxmox_vmid": single_vmid}]
+
+    # Shared template — vm_name is a placeholder; overridden per VM below.
+    migration_template = MigrationConfig(
+        vm_name="",
+        migration_datastore=migration_ds,
+        proxmox_storage=px_storage,
+        proxmox_vmid=0,
+        proxmox_bridges=px_bridges,
+        max_cores=max_cores,
+        max_sockets=max_sockets,
+        staging_dir=staging_dir,
+        virtio_driver_path=virtio_driver_path,
+        virtio_tools_path=virtio_tools_path,
+        export_nic_script=export_nic_script,
+        vioscsi_script=vioscsi_script,
+    )
+
+    app_configs: list[AppConfig] = []
+    for entry in vm_targets:
+        if not entry.get("vm_name"):
+            raise ConfigurationError("Each vms entry must have a vm_name")
+        # Pick only known MigrationConfig fields from the entry, cast numeric types.
+        overrides: dict = {}
+        for key, val in entry.items():
+            if key not in _MIGRATION_FIELD_NAMES:
+                continue
+            if key in ("proxmox_vmid", "max_cores", "max_sockets"):
+                val = int(val)
+            overrides[key] = val
+        vm_migration = replace(migration_template, **overrides)
+        app_configs.append(AppConfig(
+            vcenter=vcenter_config,
+            proxmox=proxmox_config,
+            guest=guest_config,
+            migration=vm_migration,
+        ))
+
+    # ------------------------------------------------------------------
     # Runtime flags (CLI > YAML > defaults)
     # ------------------------------------------------------------------
     skip_to = int(_pick(args.skip_to, yaml_data.get("skip_to"), 1))
     dry_run = bool(_pick(args.dry_run, yaml_data.get("dry_run"), False))
-
-    app_config = AppConfig(
-        vcenter=VCenterConfig(
-            host=vc_host,
-            user=vc_user,
-            password=vc_password,
-            port=int(vc_port),
-            insecure=bool(vc_insecure),
-        ),
-        proxmox=ProxmoxConfig(
-            host=px_host,
-            user=px_user,
-            node=px_node,
-            password=px_password,
-            token_name=px_token_name,
-            token_value=px_token_value,
-            port=int(px_port),
-            verify_ssl=bool(px_verify_ssl),
-        ),
-        guest=GuestConfig(
-            user=guest_user,
-            password=guest_password,
-        ),
-        migration=MigrationConfig(
-            vm_name=vm_name,
-            migration_datastore=migration_ds,
-            proxmox_storage=px_storage,
-            proxmox_vmid=px_vmid,
-            proxmox_bridges=px_bridges,
-            max_cores=max_cores,
-            max_sockets=max_sockets,
-            staging_dir=staging_dir,
-            virtio_driver_path=virtio_driver_path,
-            virtio_tools_path=virtio_tools_path,
-            export_nic_script=export_nic_script,
-            vioscsi_script=vioscsi_script,
-        ),
-    )
+    parallel = bool(_pick(args.parallel, yaml_data.get("parallel"), False))
 
     runtime = {
         "skip_to": skip_to,
         "dry_run": dry_run,
+        "parallel": parallel,
     }
 
-    return app_config, runtime
+    return app_configs, runtime

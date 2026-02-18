@@ -42,17 +42,15 @@ guest:
 # Migration settings
 # ---------------------------------------------------------------------------
 migration:
-  vm_name: ""                        # --vm-name              (required)
   migration_datastore: ""            # --migration-datastore  (required)
   proxmox_storage: ""                # --proxmox-storage      (required)
-  proxmox_vmid: 0                    # --proxmox-vmid         (0 = next available)
 
   # NIC bridges — comma-separated, mapped to NICs in order.
   # If fewer bridges than NICs, the last bridge is reused.
   # Example: "vmbr0,vmbr1" with 3 NICs → net0=vmbr0, net1=vmbr1, net2=vmbr1
-  proxmox_bridges: "vmbr0"          # --proxmox-bridges
+  proxmox_bridges: "vmbr0"          # --proxmox-bridges  (shared default, overridable per VM)
 
-  # CPU limits
+  # CPU limits (shared defaults, overridable per VM)
   max_cores: 0                       # --max-cores    (0 = use vCenter vCPU count as-is)
   max_sockets: 1                     # --max-sockets  (default: 1)
 
@@ -63,9 +61,31 @@ migration:
   export_nic_script: "C:\\TMP\\pveMigration\\exportNicConfig.ps1"               # --export-nic-script
   vioscsi_script: "C:\\TMP\\pveMigration\\enable-vioscsi-to-load-on-boot.ps1"   # --vioscsi-script
 
+  # ---------------------------------------------------------------------------
+  # VM list — specify one or more VMs to migrate.
+  #
+  # Each entry must have vm_name. Any other migration field (proxmox_bridges,
+  # proxmox_vmid, max_cores, max_sockets, proxmox_storage, etc.) can be
+  # overridden per VM; unset fields fall back to the shared defaults above.
+  #
+  # Single-VM shorthand (backward compatible):
+  #   vm_name: "my-vm"
+  #   proxmox_vmid: 0
+  # ---------------------------------------------------------------------------
+  vms:
+    - vm_name: ""                    # required
+      proxmox_vmid: 0                # 0 = next available
+      proxmox_bridges: "vmbr0"
+    # - vm_name: ""
+    #   proxmox_vmid: 0
+    #   proxmox_bridges: "vmbr1"     # override bridge for this VM
+    #   max_cores: 4                 # override CPU config for this VM
+    #   max_sockets: 2
+
 # ---------------------------------------------------------------------------
 # Workflow control
 # ---------------------------------------------------------------------------
-skip_to: 1                           # --skip-to   (resume from step N, 1-6)
-dry_run: false                       # --dry-run   (log actions without executing)
-verbose: false                       # --verbose   (enable debug-level logging)
+skip_to: 1                           # --skip-to    (resume from step N, 1-6)
+dry_run: false                       # --dry-run    (log actions without executing)
+parallel: false                      # --parallel   (migrate all VMs concurrently)
+verbose: false                       # --verbose    (enable debug-level logging)
