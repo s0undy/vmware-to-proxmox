@@ -56,7 +56,7 @@ Useful options:
 
 ## Migrating multiple VMs
 
-Add a `vms:` list under `migration:` in your config file. Shared settings (datastore, storage, paths, etc.) go at the top of the `migration:` block; any field can be overridden per VM.
+Add a `vms:` list under `migration:` in your config file. Shared settings (datastore, storage, paths, etc.) go at the top of the `migration:` block; any migration field plus `guest_user`/`guest_password` can be overridden per VM.
 
 ```yaml
 migration:
@@ -73,6 +73,8 @@ migration:
       proxmox_bridges: "vmbr1"  # different bridge
       max_cores: 4               # different CPU topology
       max_sockets: 2
+      guest_user: "OtherAdmin"   # different guest credentials
+      guest_password: "secret"
 ```
 
 By default the VMs are migrated **sequentially** (one after the other). To migrate them all at the same time, set `parallel: true` in your config or pass `--parallel`:

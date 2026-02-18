@@ -64,9 +64,10 @@ migration:
   # ---------------------------------------------------------------------------
   # VM list — specify one or more VMs to migrate.
   #
-  # Each entry must have vm_name. Any other migration field (proxmox_bridges,
+  # Each entry must have vm_name. Any migration field (proxmox_bridges,
   # proxmox_vmid, max_cores, max_sockets, proxmox_storage, etc.) can be
-  # overridden per VM; unset fields fall back to the shared defaults above.
+  # overridden per VM. Guest credentials (guest_user, guest_password) can
+  # also be overridden per VM; unset fields fall back to the shared defaults.
   #
   # Single-VM shorthand (backward compatible):
   #   vm_name: "my-vm"
@@ -74,13 +75,17 @@ migration:
   # ---------------------------------------------------------------------------
   vms:
     - vm_name: ""                    # required
-      proxmox_vmid: 0                # 0 = next available
+      proxmox_vmid:                 # 0 = next available
       proxmox_bridges: "vmbr0"
+      max_cores: 2
+      max_sockets: 1
     # - vm_name: ""
     #   proxmox_vmid: 0
     #   proxmox_bridges: "vmbr1"     # override bridge for this VM
     #   max_cores: 4                 # override CPU config for this VM
     #   max_sockets: 2
+    #   guest_user: "OtherAdmin"     # override guest credentials for this VM
+    #   guest_password: ""
 
 # ---------------------------------------------------------------------------
 # Workflow control

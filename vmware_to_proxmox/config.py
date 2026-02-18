@@ -250,10 +250,20 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
                 val = int(val)
             overrides[key] = val
         vm_migration = replace(migration_template, **overrides)
+
+        # Guest credentials can be overridden per VM.
+        vm_guest_user = entry.get("guest_user") or guest_config.user
+        vm_guest_password = entry.get("guest_password") or guest_config.password
+        vm_guest = (
+            GuestConfig(user=vm_guest_user, password=vm_guest_password)
+            if (vm_guest_user != guest_config.user or vm_guest_password != guest_config.password)
+            else guest_config
+        )
+
         app_configs.append(AppConfig(
             vcenter=vcenter_config,
             proxmox=proxmox_config,
-            guest=guest_config,
+            guest=vm_guest,
             migration=vm_migration,
         ))
 
