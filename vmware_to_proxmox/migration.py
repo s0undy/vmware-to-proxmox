@@ -1,6 +1,7 @@
 """Migration orchestrator — ties all ten steps together."""
 
 import logging
+import time
 
 from .config import AppConfig
 from .exceptions import GuestOperationError, MigrationError, ProxmoxOperationError
@@ -224,7 +225,9 @@ class MigrationOrchestrator:
             return
 
         self.px.start_vm(vmid)
-        logger.info("  VM %d start command sent.", vmid)
+        logger.info("  VM %d start command sent. Waiting 20s for VM to start ...", vmid)
+        time.sleep(20)
+        logger.info("  Ready to proceed.")
 
     def _step_9_move_disks(self, vm):
         vmid = self._resolve_vmid()
@@ -238,20 +241,23 @@ class MigrationOrchestrator:
                 "Set --proxmox-final-storage or proxmox_final_storage in config."
             )
 
-        # Move data disks one at a time
-        for i, disk in enumerate(vm_config["disks"]):
-            disk_name = f"scsi{i}"
-            if self.dry_run:
-                logger.info("  DRY RUN: would move %s -> %s (qcow2)", disk_name, final_storage)
-                continue
-            self.px.move_disk(vmid, disk_name, final_storage)
-
-        # Move EFI disk if present
+        # Build list of all disks to move
+        disks_to_move = [f"scsi{i}" for i in range(len(vm_config["disks"]))]
         if vm_config["firmware"] == "efi":
+            disks_to_move.append("efidisk0")
+
+        total = len(disks_to_move)
+        logger.info("  %d disk(s) to move.", total)
+
+        # Move disks one at a time with progress
+        for idx, disk_name in enumerate(disks_to_move, start=1):
+            pct = int(idx / total * 100)
             if self.dry_run:
-                logger.info("  DRY RUN: would move efidisk0 -> %s (qcow2)", final_storage)
-            else:
-                self.px.move_disk(vmid, "efidisk0", final_storage)
+                logger.info("  DRY RUN: [%d/%d %3d%%] would move %s -> %s (qcow2)",
+                            idx, total, pct, disk_name, final_storage)
+                continue
+            logger.info("  [%d/%d %3d%%] Moving %s ...", idx, total, pct, disk_name)
+            self.px.move_disk(vmid, disk_name, final_storage)
 
         logger.info("  All disks moved to %s.", final_storage)
 
@@ -262,7 +268,9 @@ class MigrationOrchestrator:
                 return
             logger.info("  Starting VM after disk move ...")
             self.px.start_vm(vmid)
-            logger.info("  VM %d start command sent.", vmid)
+            logger.info("  VM %d start command sent. Waiting 20s for VM to start ...", vmid)
+            time.sleep(20)
+            logger.info("  Ready to proceed.")
 
     def _step_10_verify(self, vm):
         vmid = self._resolve_vmid()
