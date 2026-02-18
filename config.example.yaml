@@ -27,6 +27,9 @@ proxmox:
   node: "pve"                        # --proxmox-node
   port: 8006                         # --proxmox-port
   verify_ssl: false                  # --proxmox-verify-ssl
+  # SSH access (for VMDK descriptor rewriting on the Proxmox node):
+  # ssh_user: "root"                 # --proxmox-ssh-user  (default: API user without realm)
+  # ssh_port: 22                     # --proxmox-ssh-port  (default: 22)
   # Token auth (alternative to password):
   # token_name: "migrate"            # --proxmox-token-name
   # token_value: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # --proxmox-token-value
@@ -90,7 +93,7 @@ migration:
 # ---------------------------------------------------------------------------
 # Workflow control
 # ---------------------------------------------------------------------------
-skip_to: 1                           # --skip-to    (resume from step N, 1-6)
+skip_to: 1                           # --skip-to    (resume from step N, 1-7)
 dry_run: false                       # --dry-run    (log actions without executing)
 parallel: false                      # --parallel   (migrate all VMs concurrently)
 verbose: false                       # --verbose    (enable debug-level logging)

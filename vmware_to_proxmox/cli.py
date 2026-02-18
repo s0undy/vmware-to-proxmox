@@ -48,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Proxmox API port (default: 8006)")
     parser.add_argument("--proxmox-verify-ssl", action="store_true", default=None,
                         help="Verify SSL certificate for Proxmox")
+    parser.add_argument("--proxmox-ssh-user",
+                        help="SSH username for Proxmox node (default: API user without realm)")
+    parser.add_argument("--proxmox-ssh-port", type=int, default=None,
+                        help="SSH port for Proxmox node (default: 22)")
     parser.add_argument("--proxmox-token-name",
                         help="Proxmox API token name (alternative to password)")
     parser.add_argument("--proxmox-token-value",
@@ -83,8 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Workflow control
     parser.add_argument(
-        "--skip-to", type=int, default=None, choices=range(1, 7),
-        help="Resume from step N (1-6, default: 1)",
+        "--skip-to", type=int, default=None, choices=range(1, 8),
+        help="Resume from step N (1-7, default: 1)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", default=None,

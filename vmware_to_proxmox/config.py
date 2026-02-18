@@ -28,6 +28,8 @@ class ProxmoxConfig:
     token_value: str = ""
     port: int = 8006
     verify_ssl: bool = False
+    ssh_user: str = ""
+    ssh_port: int = 22
 
 
 @dataclass
@@ -132,6 +134,8 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         )
     px_port = _pick(args.proxmox_port, px_yaml.get("port"), 8006)
     px_verify_ssl = _pick(args.proxmox_verify_ssl, px_yaml.get("verify_ssl"), False)
+    px_ssh_user = args.proxmox_ssh_user or px_yaml.get("ssh_user", "")
+    px_ssh_port = int(_pick(args.proxmox_ssh_port, px_yaml.get("ssh_port"), 22))
 
     # ------------------------------------------------------------------
     # Guest
@@ -163,6 +167,8 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         token_value=px_token_value,
         port=int(px_port),
         verify_ssl=bool(px_verify_ssl),
+        ssh_user=px_ssh_user,
+        ssh_port=px_ssh_port,
     )
     guest_config = GuestConfig(
         user=guest_user,

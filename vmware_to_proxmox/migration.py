@@ -1,4 +1,4 @@
-"""Migration orchestrator — ties all six steps together."""
+"""Migration orchestrator — ties all seven steps together."""
 
 import logging
 
@@ -10,7 +10,7 @@ from .vcenter import VCenterClient
 
 logger = logging.getLogger(__name__)
 
-TOTAL_STEPS = 6
+TOTAL_STEPS = 7
 
 
 class MigrationOrchestrator:
@@ -51,6 +51,7 @@ class MigrationOrchestrator:
             (4, "Enable VirtIO SCSI boot driver", self._step_4_enable_vioscsi),
             (5, "Install VirtIO guest tools", self._step_5_install_virtio_tools),
             (6, "Shut down VM", self._step_6_shutdown),
+            (7, "Rewrite VMDK descriptors", self._step_7_rewrite_vmdk_descriptors),
         ]
 
         for num, label, fn in steps:
@@ -103,6 +104,7 @@ class MigrationOrchestrator:
 
     def _step_2_create_proxmox_vm(self, vm):
         vm_config = self.vc.get_vm_config(vm)
+        self._vm_config = vm_config
 
         logger.info("  CPUs:     %d  (%d sockets x %d cores)",
                      vm_config["num_cpus"],
@@ -120,6 +122,7 @@ class MigrationOrchestrator:
             return
 
         vmid = self.px.create_vm(vm_config, self.config.migration)
+        self._vmid = vmid
         logger.info("  Proxmox VM created — VMID %d", vmid)
 
     def _step_3_export_nic_config(self, vm):
@@ -186,6 +189,35 @@ class MigrationOrchestrator:
         self.vc.shutdown_guest(vm)
         logger.info("  VM is powered off.")
 
+    def _step_7_rewrite_vmdk_descriptors(self, vm):
+        # When resuming from this step (skipping step 2), fetch config anew.
+        vm_config = getattr(self, "_vm_config", None)
+        vmid = getattr(self, "_vmid", None)
+
+        if vm_config is None:
+            vm_config = self.vc.get_vm_config(vm)
+
+        if vmid is None:
+            vmid = self.config.migration.proxmox_vmid
+            if not vmid:
+                raise MigrationError(
+                    "Cannot rewrite VMDK descriptors: VMID unknown. "
+                    "Run from step 2, or set proxmox_vmid in config."
+                )
+
+        if self.dry_run:
+            for i, d in enumerate(vm_config["disks"]):
+                logger.info("  DRY RUN: would rewrite scsi%d: %s -> vm-%d-disk-%d.vmdk",
+                            i, d["filename"], vmid, i)
+            return
+
+        self.px.rewrite_vmdk_descriptors(
+            vmid=vmid,
+            vm_config=vm_config,
+            storage_name=self.config.migration.proxmox_storage,
+        )
+        logger.info("  All VMDK descriptors rewritten.")
+
     # ------------------------------------------------------------------
     # Post-migration guidance
     # ------------------------------------------------------------------
@@ -197,10 +229,7 @@ class MigrationOrchestrator:
         logger.info("=" * 60)
         logger.info("")
         logger.info("Remaining manual steps:")
-        logger.info("  1. Copy the VMDK files from datastore '%s' to Proxmox storage '%s'",
-                     self.config.migration.migration_datastore,
-                     self.config.migration.proxmox_storage)
-        logger.info("  2. Boot the VM on Proxmox")
-        logger.info("  3. Run importNicConfig.ps1 to restore network configuration")
-        logger.info("  4. Run purge-vmware-tools.ps1 -Force to remove VMware Tools")
-        logger.info("  5. Reboot the VM")
+        logger.info("  1. Boot the VM on Proxmox")
+        logger.info("  2. Run importNicConfig.ps1 to restore network configuration")
+        logger.info("  3. Run purge-vmware-tools.ps1 -Force to remove VMware Tools")
+        logger.info("  4. Reboot the VM")
