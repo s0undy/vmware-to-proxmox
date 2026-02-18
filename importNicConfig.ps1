@@ -1,18 +1,18 @@
 $importPath = "C:\TMP\pveMigration\network.json"
 
-$importDir = Split-Path -Path $importPath -Parent
-if (-Not (Test-Path $importDir)) {
-    New-Item -ItemType Directory -Path $importDir -Force | Out-Null
-}
-
 if (-Not (Test-Path $importPath)) {
     Write-Error "File $importPath was not found."
-    exit
+    exit 1
 }
 
 $configs = Get-Content $importPath | ConvertFrom-Json
 
-# Get all adapters sorted by InterfaceIndex to produce a stable ordering
+# Sort saved configs by nicIndex to ensure positional ordering
+$configs = $configs | Sort-Object nicIndex
+
+# Get all adapters sorted by InterfaceIndex (matches NIC creation order in Proxmox).
+# The positional index here corresponds to the nicIndex from the export —
+# both VMware and Proxmox create NICs in the same order.
 $adapters = Get-NetAdapter | Sort-Object InterfaceIndex
 
 foreach ($config in $configs) {
@@ -27,18 +27,29 @@ foreach ($config in $configs) {
     $alias = $adapter.Name
 
     Write-Host "Applying configuration to $alias (nicIndex $idx)..."
+    Write-Host "  IP: $($config.ipv4Address)/$($config.prefixLength)  GW: $($config.defaultGateway)  DNS: $($config.dnsServers)"
 
-    # Clear old settings (optional)
+    # Clear existing IP addresses and routes
     try {
-        Remove-NetIPAddress -InterfaceAlias $alias -Confirm:$false -ErrorAction SilentlyContinue
-        Remove-NetRoute -InterfaceAlias $alias -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-NetRoute -InterfaceIndex $adapter.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue
     } catch {}
 
     # Set new IP
-    New-NetIPAddress -InterfaceAlias $alias -IPAddress $config.ipv4Address -PrefixLength $config.prefixLength -DefaultGateway $config.defaultGateway
+    $ipParams = @{
+        InterfaceIndex = $adapter.InterfaceIndex
+        IPAddress      = $config.ipv4Address
+        PrefixLength   = $config.prefixLength
+    }
+    if ($config.defaultGateway) {
+        $ipParams["DefaultGateway"] = $config.defaultGateway
+    }
+    New-NetIPAddress @ipParams
 
     # Set DNS
-    Set-DnsClientServerAddress -InterfaceAlias $alias -ServerAddresses ($config.dnsServers -split ",")
+    if ($config.dnsServers) {
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses ($config.dnsServers -split ",")
+    }
 }
 
 Write-Host "Import complete."

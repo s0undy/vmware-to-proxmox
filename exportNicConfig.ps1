@@ -8,17 +8,23 @@ if (-Not (Test-Path $exportDir)) {
 $networkConfigs = @()
 $nicIndex = 0
 
-# Only consider adapters with a valid IPv4 address
-$adapters = Get-NetIPConfiguration | Where-Object { $_.IPv4Address -ne $null }
+# Get all physical/virtual adapters sorted by InterfaceIndex (matches NIC creation order).
+# Then look up IP configuration for each adapter that has one.
+$adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Sort-Object InterfaceIndex
 
 foreach ($adapter in $adapters) {
+    $ipConfig = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex -ErrorAction SilentlyContinue
+    if ($null -eq $ipConfig -or $null -eq $ipConfig.IPv4Address) {
+        continue
+    }
+
     $config = [PSCustomObject]@{
         nicIndex         = $nicIndex
-        interfaceAlias   = $adapter.InterfaceAlias
-        ipv4Address      = $adapter.IPv4Address.IPAddress
-        prefixLength     = $adapter.IPv4Address.PrefixLength
-        defaultGateway   = $adapter.IPv4DefaultGateway.NextHop
-        dnsServers       = ($adapter.DnsServer.ServerAddresses -join ",")
+        interfaceAlias   = $adapter.Name
+        ipv4Address      = $ipConfig.IPv4Address.IPAddress
+        prefixLength     = $ipConfig.IPv4Address.PrefixLength
+        defaultGateway   = $ipConfig.IPv4DefaultGateway.NextHop
+        dnsServers       = ($ipConfig.DnsServer.ServerAddresses -join ",")
     }
 
     $networkConfigs += $config
