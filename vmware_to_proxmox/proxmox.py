@@ -149,7 +149,7 @@ class ProxmoxClient:
         # Disks — preserve order from vCenter
         for i, disk in enumerate(vm_config["disks"]):
             size_gb = int(disk["size_gb"]) or 1
-            params[f"scsi{i}"] = f"{storage}:{size_gb},format=vmdk"
+            params[f"scsi{i}"] = f"{storage}:{size_gb},format=vmdk,ssd=1,discard=on,iothread=1"
 
         # NICs — preserve order, use ordered bridge list
         bridges = [b.strip() for b in migration_config.proxmox_bridges.split(",")]

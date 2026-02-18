@@ -48,6 +48,7 @@ migration:
   migration_datastore: ""            # --migration-datastore       (required)
   proxmox_storage: ""                # --proxmox-storage          (required)
   proxmox_final_storage: ""          # --proxmox-final-storage    (step 9: move disks here as qcow2)
+  start_vm_before_move: true         # --start-vm-before-move / --no-start-vm-before-move
 
   # NIC bridges — comma-separated, mapped to NICs in order.
   # If fewer bridges than NICs, the last bridge is reused.

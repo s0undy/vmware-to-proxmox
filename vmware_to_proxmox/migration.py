@@ -213,6 +213,11 @@ class MigrationOrchestrator:
 
     def _step_8_start_vm(self, vm):
         vmid = self._resolve_vmid()
+        start_before = self.config.migration.start_vm_before_move
+
+        if not start_before:
+            logger.info("  start_vm_before_move=false — VM will start after disks are moved.")
+            return
 
         if self.dry_run:
             logger.info("  DRY RUN: would start VMID %d", vmid)
@@ -225,6 +230,7 @@ class MigrationOrchestrator:
         vmid = self._resolve_vmid()
         vm_config = self._resolve_vm_config(vm)
         final_storage = self.config.migration.proxmox_final_storage
+        start_before = self.config.migration.start_vm_before_move
 
         if not final_storage:
             raise MigrationError(
@@ -248,6 +254,15 @@ class MigrationOrchestrator:
                 self.px.move_disk(vmid, "efidisk0", final_storage)
 
         logger.info("  All disks moved to %s.", final_storage)
+
+        # Start VM after move if not started in step 8
+        if not start_before:
+            if self.dry_run:
+                logger.info("  DRY RUN: would start VMID %d after move", vmid)
+                return
+            logger.info("  Starting VM after disk move ...")
+            self.px.start_vm(vmid)
+            logger.info("  VM %d start command sent.", vmid)
 
     def _step_10_verify(self, vm):
         vmid = self._resolve_vmid()

@@ -6,16 +6,18 @@ The tool connects to both vCenter and Proxmox, then automates the pre-migration 
 
 ## What it does
 
-The migration runs in six steps:
+The migration runs in ten steps:
 
 1. **Storage vMotion** the VM to a shared/accessible datastore
-2. **Create the Proxmox VM** shell (matching CPU, RAM, disks, NICs)
+2. **Create the Proxmox VM** shell (matching CPU, RAM, disks, NICs with SSD emulation, discard, and IO threads enabled)
 3. **Export NIC configuration** inside the guest to `network.json`
 4. **Enable VirtIO SCSI boot driver** so Windows can boot from VirtIO disks
 5. **Install VirtIO guest tools** inside the guest
 6. **Shut down the VM**
-
-After that, you manually copy the VMDK files to Proxmox, boot the VM, and run the post-migration scripts.
+7. **Rewrite VMDK descriptors** on the Proxmox node to point at the original flat files
+8. **Start the VM in Proxmox** (skipped if `start_vm_before_move: false`)
+9. **Move disks to final storage** — moves each disk (including EFI disk) one at a time to `proxmox_final_storage`, converting to qcow2. Source disks are kept. If `start_vm_before_move: false`, the VM is started after all disks are moved.
+10. **Verify migration** — confirms the VM is running and all disks reside on the final storage
 
 ## Prerequisites
 
@@ -50,7 +52,7 @@ Useful options:
 | Flag | Purpose |
 |---|---|
 | `--dry-run` | Log what would happen without making changes |
-| `--skip-to N` | Resume from step N (1-6) |
+| `--skip-to N` | Resume from step N (1-10) |
 | `--parallel` | Migrate all VMs concurrently |
 | `--verbose` | Debug-level logging |
 
@@ -61,16 +63,21 @@ Add a `vms:` list under `migration:` in your config file. Shared settings (datas
 ```yaml
 migration:
   migration_datastore: "shared-ds"
-  proxmox_storage: "local-lvm"
+  proxmox_storage: "migration-nfs"
+  proxmox_final_storage: "local-lvm"
   proxmox_bridges: "vmbr0"      # default bridge for all VMs
+  start_vm_before_move: true     # start VM before moving disks (default)
 
   vms:
     - vm_name: "web-server"
       proxmox_vmid: 200
       proxmox_bridges: "vmbr0"
+      proxmox_final_storage: "local-lvm"
     - vm_name: "db-server"
       proxmox_vmid: 201
       proxmox_bridges: "vmbr1"  # different bridge
+      proxmox_final_storage: "ceph-pool"  # different final storage
+      start_vm_before_move: false  # start after disks are moved
       max_cores: 4               # different CPU topology
       max_sockets: 2
       guest_user: "OtherAdmin"   # different guest credentials
@@ -93,8 +100,6 @@ python migrate.py --vm-name "my-vm"
 
 ## Post-migration (manual)
 
-1. Copy VMDK files from the migration datastore to Proxmox storage
-2. Boot the VM on Proxmox
-3. Run `importNicConfig.ps1` to restore network settings
-4. Run `purge-vmware-tools.ps1 -Force` to remove VMware Tools
-5. Reboot
+1. Run `importNicConfig.ps1` to restore network settings
+2. Run `purge-vmware-tools.ps1 -Force` to remove VMware Tools
+3. Reboot
