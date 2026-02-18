@@ -81,11 +81,13 @@ migration:
     - vm_name: ""                    # required
       proxmox_vmid:                 # 0 = next available
       proxmox_bridges: "vmbr0"
+      proxmox_final_storage: ""     # override final storage for this VM
       max_cores: 2
       max_sockets: 1
     # - vm_name: ""
     #   proxmox_vmid: 0
     #   proxmox_bridges: "vmbr1"     # override bridge for this VM
+    #   proxmox_final_storage: ""    # override final storage for this VM
     #   max_cores: 4                 # override CPU config for this VM
     #   max_sockets: 2
     #   guest_user: "OtherAdmin"     # override guest credentials for this VM
