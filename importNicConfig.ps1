@@ -33,28 +33,20 @@ for ($i = 0; $i -lt $configs.Count; $i++) {
     Write-Host "Applying config $i to '$alias' (ifIndex $($adapter.InterfaceIndex))..."
     Write-Host "  IP: $($config.ipv4Address)/$($config.prefixLength)  GW: $($config.defaultGateway)  DNS: $($config.dnsServers)"
 
-    # Disable DHCP so the static IP persists across reboots
-    Set-NetIPInterface -InterfaceIndex $adapter.InterfaceIndex -Dhcp Disabled -ErrorAction SilentlyContinue
+    # Use netsh to set static IP — this atomically disables DHCP and assigns
+    # the address in one step, avoiding the "Inconsistent parameters
+    # PolicyStore PersistentStore and Dhcp Enabled" error from New-NetIPAddress.
+    $prefixLen = [int]$config.prefixLength
+    $maskInt = [uint32]([math]::Pow(2, 32) - [math]::Pow(2, 32 - $prefixLen))
+    $subnetMask = "{0}.{1}.{2}.{3}" -f (($maskInt -shr 24) -band 0xFF), (($maskInt -shr 16) -band 0xFF), (($maskInt -shr 8) -band 0xFF), ($maskInt -band 0xFF)
 
-    # Clear existing IP addresses and routes
-    try {
-        Remove-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue
-        Remove-NetRoute -InterfaceIndex $adapter.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue
-    } catch {}
-
-    # Set new IP
-    $ipParams = @{
-        InterfaceIndex = $adapter.InterfaceIndex
-        IPAddress      = $config.ipv4Address
-        PrefixLength   = $config.prefixLength
-    }
     if ($config.defaultGateway) {
-        $ipParams["DefaultGateway"] = $config.defaultGateway
+        netsh interface ip set address name="$alias" static $($config.ipv4Address) $subnetMask $($config.defaultGateway)
+    } else {
+        netsh interface ip set address name="$alias" static $($config.ipv4Address) $subnetMask
     }
-    try {
-        New-NetIPAddress @ipParams -ErrorAction Stop
-    } catch {
-        Write-Warning "New-NetIPAddress failed for adapter '$alias': $_"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "netsh set address failed for adapter '$alias' (exit code $LASTEXITCODE)"
         exit 1
     }
 
