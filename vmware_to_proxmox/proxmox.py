@@ -65,6 +65,7 @@ class ProxmoxClient:
                     token_value=self.config.token_value,
                     verify_ssl=self.config.verify_ssl,
                     port=self.config.port,
+                    timeout=30,
                 )
             else:
                 self.api = ProxmoxAPI(
@@ -73,6 +74,7 @@ class ProxmoxClient:
                     password=self.config.password,
                     verify_ssl=self.config.verify_ssl,
                     port=self.config.port,
+                    timeout=30,
                 )
             # Quick connectivity check
             self.api.version.get()

@@ -465,11 +465,11 @@ class MigrationOrchestrator:
             )
         logger.info("  NIC configuration restored.")
 
-        logger.info("  Waiting 5s before reboot ...")
-        time.sleep(5)
+        logger.info("  Waiting 15s before reboot ...")
+        time.sleep(15)
         self.px.reboot_vm(vmid)
-        logger.info("  Waiting 20s for VM to start up ...")
-        time.sleep(20)
+        logger.info("  Waiting 60s for VM to start up ...")
+        time.sleep(60)
 
     def _step_14_enable_nics(self, vm):
         vmid = self._resolve_vmid()
