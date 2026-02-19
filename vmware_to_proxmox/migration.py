@@ -79,7 +79,11 @@ class MigrationOrchestrator:
             logger.info("")
             logger.info("STEP %d/%d: %s", num, TOTAL_STEPS, label)
             logger.info("-" * 40)
+            step_start = time.monotonic()
             fn(vm)
+            step_elapsed = time.monotonic() - step_start
+            step_min, step_sec = divmod(int(step_elapsed), 60)
+            logger.info("  Step %d completed in %dm %ds", num, step_min, step_sec)
 
         # Query guest agent for primary IP address
         ip_address = None
@@ -340,6 +344,9 @@ class MigrationOrchestrator:
             logger.info("  %s: %s", key, value)
 
         logger.info("  Verification passed — all disks on %s, VM running.", final_storage)
+
+        logger.info("  Waiting 120s for VM to fully boot ...")
+        time.sleep(120)
 
     def _step_11_install_virtio_drivers(self, vm):
         vmid = self._resolve_vmid()
