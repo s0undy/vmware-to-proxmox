@@ -319,6 +319,9 @@ class MigrationOrchestrator:
                         iso_storage, iso_filename, vmid)
             return
 
+        # Wait for the VM to be running and Windows to start up
+        self._wait_for_vm_ready(vmid)
+
         # Mount the VirtIO ISO
         self.px.mount_iso(vmid, iso_storage, iso_filename)
         logger.info("  Waiting 5s for ISO to become available ...")
@@ -366,12 +369,6 @@ class MigrationOrchestrator:
             )
         logger.info("  VirtIO driver package installed.")
 
-        logger.info("  Waiting 20s before reboot ...")
-        time.sleep(20)
-        self.px.reboot_vm(vmid)
-        logger.info("  Waiting 20s for VM to start up ...")
-        time.sleep(20)
-
     def _step_12_purge_vmware_tools(self, vm):
         vmid = self._resolve_vmid()
         script = self.config.migration.purge_vmware_script
@@ -379,6 +376,9 @@ class MigrationOrchestrator:
         if self.dry_run:
             logger.info("  DRY RUN: would run %s -Force on VMID %d", script, vmid)
             return
+
+        # Wait for the VM to be running and Windows to start up
+        self._wait_for_vm_ready(vmid)
 
         logger.info("  Waiting for QEMU guest agent ...")
         self.px.wait_for_guest_agent(vmid)
@@ -411,6 +411,9 @@ class MigrationOrchestrator:
         if self.dry_run:
             logger.info("  DRY RUN: would run %s on VMID %d", script, vmid)
             return
+
+        # Wait for the VM to be running and Windows to start up
+        self._wait_for_vm_ready(vmid)
 
         logger.info("  Waiting for QEMU guest agent ...")
         self.px.wait_for_guest_agent(vmid)
@@ -472,6 +475,22 @@ class MigrationOrchestrator:
                     "VMID unknown. Run from step 2, or set proxmox_vmid in config."
                 )
         return vmid
+
+    def _wait_for_vm_ready(self, vmid: int, settle_seconds: int = 30) -> None:
+        """Wait until Proxmox reports the VM as running, then wait extra time for Windows to boot."""
+        logger.info("  Waiting for VM %d to be running ...", vmid)
+        for _ in range(60):
+            status = self.px.get_vm_status(vmid)
+            if status == "running":
+                break
+            time.sleep(5)
+        else:
+            raise ProxmoxOperationError(
+                f"VM {vmid} did not reach 'running' state (current: {status})"
+            )
+        logger.info("  VM %d is running. Waiting %ds for Windows to start up ...", vmid, settle_seconds)
+        time.sleep(settle_seconds)
+        logger.info("  Ready to proceed.")
 
     def _resolve_vm_config(self, vm):
         """Return the vCenter vm_config from step 2 or fetch it fresh."""
