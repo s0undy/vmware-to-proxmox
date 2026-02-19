@@ -1,3 +1,7 @@
+#################################
+#MIT License
+#Copyright (c) 2025 derhanns
+#################################
 # Purpose of this script
 # * make Windows load the VirtIO SCSI pass-through driver on boot without reboot or external programs
 #

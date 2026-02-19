@@ -157,7 +157,10 @@ class ProxmoxClient:
         bridges = [b.strip() for b in migration_config.proxmox_bridges.split(",")]
         for i, nic in enumerate(vm_config["nics"]):
             bridge = bridges[min(i, len(bridges) - 1)]
-            params[f"net{i}"] = f"virtio,bridge={bridge},link_down=1"
+            if migration_config.enable_nics_on_boot:
+                params[f"net{i}"] = f"virtio,bridge={bridge}"
+            else:
+                params[f"net{i}"] = f"virtio,bridge={bridge},link_down=1"
 
         # EFI disk when using OVMF
         if bios == "ovmf":

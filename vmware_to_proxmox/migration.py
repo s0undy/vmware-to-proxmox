@@ -13,6 +13,19 @@ logger = logging.getLogger(__name__)
 
 TOTAL_STEPS = 14
 
+# -- Timing constants (seconds) ------------------------------------------------
+SHUTDOWN_SETTLE_SECONDS = 30       # Post-shutdown grace before modifying Proxmox
+VM_START_SETTLE_SECONDS = 30       # Wait after VM power-on command
+VM_FULL_BOOT_SECONDS = 120         # Full Windows boot after verification
+VIRTIO_INSTALL_SETTLE_SECONDS = 120  # VM settle after VirtIO driver install
+ISO_MOUNT_WAIT_SECONDS = 5         # ISO availability after mount
+PRE_REBOOT_PAUSE_SECONDS = 10      # Grace period before reboot (step 12)
+POST_REBOOT_BOOT_SECONDS = 120     # Windows boot after reboot (steps 12, 13)
+NIC_RESTORE_PRE_REBOOT_SECONDS = 15  # Grace period before reboot (step 13)
+FINAL_REBOOT_BOOT_SECONDS = 120    # Windows boot after final reboot (step 14)
+VM_READY_TIMEOUT_SECONDS = 300     # Max wait for VM to reach 'running'
+VM_READY_POLL_SECONDS = 5          # Poll interval for VM ready check
+
 
 class MigrationOrchestrator:
     def __init__(self, config: AppConfig, skip_to: int = 1, dry_run: bool = False):
@@ -45,6 +58,8 @@ class MigrationOrchestrator:
             logger.info("  Proxmox final store: %s", self.config.migration.proxmox_final_storage)
         if self.dry_run:
             logger.info("  *** DRY RUN — no changes will be made ***")
+        if self.config.migration.enable_nics_on_boot:
+            logger.info("  NICs on boot:        enabled (reduced wait timers)")
         if self.skip_to > 1:
             logger.info("  Resuming from step %d", self.skip_to)
         logger.info("=" * 60)
@@ -232,8 +247,8 @@ class MigrationOrchestrator:
         logger.info("  Sending shutdown signal ...")
         self.vc.shutdown_guest(vm)
         logger.info("  VM is powered off.")
-        logger.info("  Waiting 30s for clean shutdown before modifying Proxmox ...")
-        time.sleep(30)
+        logger.info("  Waiting %ds for clean shutdown before modifying Proxmox ...", SHUTDOWN_SETTLE_SECONDS)
+        time.sleep(SHUTDOWN_SETTLE_SECONDS)
 
     def _step_7_rewrite_vmdk_descriptors(self, vm):
         vm_config = self._resolve_vm_config(vm)
@@ -265,8 +280,8 @@ class MigrationOrchestrator:
             return
 
         self.px.start_vm(vmid)
-        logger.info("  VM %d start command sent. Waiting 30s for VM to start cleanly ...", vmid)
-        time.sleep(30)
+        logger.info("  VM %d start command sent. Waiting %ds for VM to start cleanly ...", vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
+        self._sleep(VM_START_SETTLE_SECONDS)
         logger.info("  Ready to proceed.")
 
     def _step_9_move_disks(self, vm):
@@ -308,8 +323,8 @@ class MigrationOrchestrator:
                 return
             logger.info("  Starting VM after disk move ...")
             self.px.start_vm(vmid)
-            logger.info("  VM %d start command sent. Waiting 30s for VM to start cleanly ...", vmid)
-            time.sleep(30)
+            logger.info("  VM %d start command sent. Waiting %ds for VM to start cleanly ...", vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
+            self._sleep(VM_START_SETTLE_SECONDS)
             logger.info("  Ready to proceed.")
 
     def _step_10_verify(self, vm):
@@ -345,8 +360,8 @@ class MigrationOrchestrator:
 
         logger.info("  Verification passed — all disks on %s, VM running.", final_storage)
 
-        logger.info("  Waiting 120s for VM to fully boot ...")
-        time.sleep(120)
+        logger.info("  Waiting %ds for VM to fully boot ...", self._effective_wait(VM_FULL_BOOT_SECONDS))
+        self._sleep(VM_FULL_BOOT_SECONDS)
 
     def _step_11_install_virtio_drivers(self, vm):
         vmid = self._resolve_vmid()
@@ -363,8 +378,8 @@ class MigrationOrchestrator:
 
         # Mount the VirtIO ISO
         self.px.mount_iso(vmid, iso_storage, iso_filename)
-        logger.info("  Waiting 5s for ISO to become available ...")
-        time.sleep(5)
+        logger.info("  Waiting %ds for ISO to become available ...", self._effective_wait(ISO_MOUNT_WAIT_SECONDS))
+        self._sleep(ISO_MOUNT_WAIT_SECONDS)
 
         # Wait for guest agent
         logger.info("  Waiting for QEMU guest agent ...")
@@ -408,8 +423,8 @@ class MigrationOrchestrator:
             )
         logger.info("  VirtIO driver package installed.")
 
-        logger.info("  Waiting 120s for VM to settle ...")
-        time.sleep(120)
+        logger.info("  Waiting %ds for VM to settle ...", self._effective_wait(VIRTIO_INSTALL_SETTLE_SECONDS))
+        self._sleep(VIRTIO_INSTALL_SETTLE_SECONDS)
 
     def _step_12_purge_vmware_tools(self, vm):
         vmid = self._resolve_vmid()
@@ -440,11 +455,11 @@ class MigrationOrchestrator:
             )
         logger.info("  VMware Tools purged.")
 
-        logger.info("  Waiting 10s before reboot ...")
-        time.sleep(10)
+        logger.info("  Waiting %ds before reboot ...", self._effective_wait(PRE_REBOOT_PAUSE_SECONDS))
+        self._sleep(PRE_REBOOT_PAUSE_SECONDS)
         self.px.reboot_vm(vmid)
-        logger.info("  Waiting 120s for VM to start cleanly ...")
-        time.sleep(120)
+        logger.info("  Waiting %ds for VM to start cleanly ...", self._effective_wait(POST_REBOOT_BOOT_SECONDS))
+        self._sleep(POST_REBOOT_BOOT_SECONDS)
 
     def _step_13_import_nic_config(self, vm):
         vmid = self._resolve_vmid()
@@ -475,11 +490,11 @@ class MigrationOrchestrator:
             )
         logger.info("  NIC configuration restored.")
 
-        logger.info("  Waiting 15s before reboot ...")
-        time.sleep(15)
+        logger.info("  Waiting %ds before reboot ...", self._effective_wait(NIC_RESTORE_PRE_REBOOT_SECONDS))
+        self._sleep(NIC_RESTORE_PRE_REBOOT_SECONDS)
         self.px.reboot_vm(vmid)
-        logger.info("  Waiting 120s for VM to start cleanly ...")
-        time.sleep(120)
+        logger.info("  Waiting %ds for VM to start cleanly ...", self._effective_wait(POST_REBOOT_BOOT_SECONDS))
+        self._sleep(POST_REBOOT_BOOT_SECONDS)
 
     def _step_14_enable_nics(self, vm):
         vmid = self._resolve_vmid()
@@ -491,22 +506,35 @@ class MigrationOrchestrator:
         # Unmount the VirtIO ISO
         self.px.unmount_iso(vmid)
 
-        # Enable all NICs (set link_down=0)
-        px_config = self.px.get_vm_config_proxmox(vmid)
-        nic_keys = sorted(k for k in px_config if k.startswith("net") and k[3:].isdigit())
-        for nic_key in nic_keys:
-            logger.info("  Enabling %s ...", nic_key)
-            self.px.set_nic_link_state(vmid, nic_key, link_down=False)
-        logger.info("  All NICs enabled.")
+        # Enable all NICs (only needed if they were created with link_down=1)
+        if not self.config.migration.enable_nics_on_boot:
+            px_config = self.px.get_vm_config_proxmox(vmid)
+            nic_keys = sorted(k for k in px_config if k.startswith("net") and k[3:].isdigit())
+            for nic_key in nic_keys:
+                logger.info("  Enabling %s ...", nic_key)
+                self.px.set_nic_link_state(vmid, nic_key, link_down=False)
+            logger.info("  All NICs enabled.")
+        else:
+            logger.info("  NICs already enabled (enable_nics_on_boot=true), skipping.")
 
         # Final reboot
         self.px.reboot_vm(vmid)
-        logger.info("  Final reboot initiated. Waiting 120s for VM to start cleanly ...")
-        time.sleep(120)
+        logger.info("  Final reboot initiated. Waiting %ds for VM to start cleanly ...", self._effective_wait(FINAL_REBOOT_BOOT_SECONDS))
+        self._sleep(FINAL_REBOOT_BOOT_SECONDS)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _effective_wait(self, base_seconds: float) -> int:
+        """Return the effective wait time — halved when NICs are enabled on boot."""
+        if self.config.migration.enable_nics_on_boot:
+            return int(base_seconds / 2)
+        return int(base_seconds)
+
+    def _sleep(self, base_seconds: float) -> None:
+        """Sleep for the given duration, halved if enable_nics_on_boot is set."""
+        time.sleep(self._effective_wait(base_seconds))
 
     def _resolve_vmid(self) -> int:
         """Return the VMID from step 2 or from config."""
@@ -522,14 +550,17 @@ class MigrationOrchestrator:
     def _wait_for_vm_ready(self, vmid: int, settle_seconds: int = 30) -> None:
         """Wait until Proxmox reports the VM as running, then wait extra time for Windows to boot."""
         logger.info("  Waiting for VM %d to be running ...", vmid)
-        for _ in range(60):
+        start = time.monotonic()
+        status = "unknown"
+        while time.monotonic() - start < VM_READY_TIMEOUT_SECONDS:
             status = self.px.get_vm_status(vmid)
             if status == "running":
                 break
-            time.sleep(5)
+            time.sleep(VM_READY_POLL_SECONDS)
         else:
             raise ProxmoxOperationError(
-                f"VM {vmid} did not reach 'running' state (current: {status})"
+                f"VM {vmid} did not reach 'running' state within "
+                f"{VM_READY_TIMEOUT_SECONDS}s (current: {status})"
             )
         logger.info("  VM %d is running. Waiting %ds for Windows to start up ...", vmid, settle_seconds)
         time.sleep(settle_seconds)

@@ -200,8 +200,8 @@ class VCenterClient:
             return
 
         vm.ShutdownGuest()
-        start = time.time()
-        while time.time() - start < timeout_seconds:
+        start = time.monotonic()
+        while time.monotonic() - start < timeout_seconds:
             if vm.runtime.powerState == vim.VirtualMachinePowerState.poweredOff:
                 return
             time.sleep(5)
@@ -217,7 +217,7 @@ class VCenterClient:
         self, task, label: str = "Task", timeout_seconds: int = 3600,
     ) -> object:
         """Poll a vCenter task to completion with progress logging."""
-        start = time.time()
+        start = time.monotonic()
         last_progress = -1
         while True:
             state = task.info.state
@@ -227,7 +227,7 @@ class VCenterClient:
                 raise VCenterOperationError(
                     f"{label} failed: {task.info.error.msg}"
                 )
-            if time.time() - start > timeout_seconds:
+            if time.monotonic() - start > timeout_seconds:
                 raise VCenterOperationError(
                     f"{label} timed out after {timeout_seconds}s"
                 )

@@ -36,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-start-vm-before-move", dest="start_vm_before_move",
                         action="store_false",
                         help="Start VM after disks are moved to final storage")
+    parser.add_argument("--enable-nics-on-boot", action="store_true", default=None,
+                        help="Create NICs with link enabled (faster boot for domain-joined VMs, "
+                             "halves wait timers)")
+    parser.add_argument("--no-enable-nics-on-boot", dest="enable_nics_on_boot",
+                        action="store_false",
+                        help="Create NICs with link disabled (default, enables in step 14)")
 
     # vCenter
     parser.add_argument("--vcenter-host", help="vCenter hostname or IP")

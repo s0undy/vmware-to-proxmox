@@ -31,8 +31,8 @@ class GuestOperations:
         self, vm: vim.VirtualMachine, timeout_seconds: int = 300,
     ) -> None:
         """Block until VMware Tools reports as running."""
-        start = time.time()
-        while time.time() - start < timeout_seconds:
+        start = time.monotonic()
+        while time.monotonic() - start < timeout_seconds:
             if vm.guest.toolsRunningStatus == "guestToolsRunning":
                 return
             time.sleep(5)
@@ -112,8 +112,8 @@ class GuestOperations:
     ) -> int:
         """Poll a guest process until it exits.  Returns exit code."""
         pm = self.vc.content.guestOperationsManager.processManager
-        start = time.time()
-        while time.time() - start < timeout_seconds:
+        start = time.monotonic()
+        while time.monotonic() - start < timeout_seconds:
             procs = pm.ListProcessesInGuest(vm, self.creds, pids=[pid])
             if not procs:
                 raise GuestOperationError(f"Guest process PID {pid} vanished")
