@@ -8,9 +8,9 @@ if (-Not (Test-Path $exportDir)) {
 $networkConfigs = @()
 $nicIndex = 0
 
-# Get all physical/virtual adapters sorted by InterfaceIndex (matches NIC creation order).
-# Then look up IP configuration for each adapter that has one.
-$adapters = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Sort-Object InterfaceIndex
+# Get all adapters sorted by InterfaceIndex (matches NIC creation order in vCenter).
+# Only include adapters that have an IPv4 address configured.
+$adapters = @(Get-NetAdapter | Sort-Object InterfaceIndex)
 
 foreach ($adapter in $adapters) {
     $ipConfig = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex -ErrorAction SilentlyContinue
@@ -33,4 +33,4 @@ foreach ($adapter in $adapters) {
 
 $networkConfigs | ConvertTo-Json -Depth 5 | Out-File -Encoding UTF8 $exportPath
 
-Write-Host "Network configuration exported to $exportPath"
+Write-Host "Exported $nicIndex NIC(s) to $exportPath"

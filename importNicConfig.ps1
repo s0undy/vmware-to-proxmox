@@ -7,26 +7,30 @@ if (-Not (Test-Path $importPath)) {
 
 $configs = Get-Content $importPath | ConvertFrom-Json
 
-# Sort saved configs by nicIndex to ensure positional ordering
-$configs = $configs | Sort-Object nicIndex
+# @() ensures the result is always an array, even with a single entry
+$configs = @($configs | Sort-Object nicIndex)
 
 # Get all adapters sorted by InterfaceIndex (matches NIC creation order in Proxmox).
-# The positional index here corresponds to the nicIndex from the export —
-# both VMware and Proxmox create NICs in the same order.
-$adapters = Get-NetAdapter | Sort-Object InterfaceIndex
+# @() ensures the result is always an array, even with a single adapter.
+$adapters = @(Get-NetAdapter | Sort-Object InterfaceIndex)
 
-foreach ($config in $configs) {
-    $idx = $config.nicIndex
+Write-Host "Found $($configs.Count) saved NIC config(s) and $($adapters.Count) adapter(s)."
 
-    if ($idx -ge $adapters.Count) {
-        Write-Warning "No adapter found for nicIndex $idx – skipping."
+# Apply configs positionally: config[0] -> adapter[0], config[1] -> adapter[1], etc.
+# The nicIndex in the export is sequential (0, 1, 2...) matching vCenter NIC order.
+# Proxmox creates NICs in the same order, so adapter[i] by InterfaceIndex matches.
+for ($i = 0; $i -lt $configs.Count; $i++) {
+    $config = $configs[$i]
+
+    if ($i -ge $adapters.Count) {
+        Write-Warning "No adapter found for NIC position $i – skipping."
         continue
     }
 
-    $adapter = $adapters[$idx]
+    $adapter = $adapters[$i]
     $alias = $adapter.Name
 
-    Write-Host "Applying configuration to $alias (nicIndex $idx)..."
+    Write-Host "Applying config $i to '$alias' (ifIndex $($adapter.InterfaceIndex))..."
     Write-Host "  IP: $($config.ipv4Address)/$($config.prefixLength)  GW: $($config.defaultGateway)  DNS: $($config.dnsServers)"
 
     # Clear existing IP addresses and routes
