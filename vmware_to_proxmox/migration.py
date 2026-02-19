@@ -408,6 +408,9 @@ class MigrationOrchestrator:
             )
         logger.info("  VirtIO driver package installed.")
 
+        logger.info("  Waiting 120s for VM to settle ...")
+        time.sleep(120)
+
     def _step_12_purge_vmware_tools(self, vm):
         vmid = self._resolve_vmid()
         script = self.config.migration.purge_vmware_script
@@ -440,8 +443,8 @@ class MigrationOrchestrator:
         logger.info("  Waiting 10s before reboot ...")
         time.sleep(10)
         self.px.reboot_vm(vmid)
-        logger.info("  Waiting 20s for VM to start up ...")
-        time.sleep(20)
+        logger.info("  Waiting 120s for VM to start cleanly ...")
+        time.sleep(120)
 
     def _step_13_import_nic_config(self, vm):
         vmid = self._resolve_vmid()
@@ -498,7 +501,8 @@ class MigrationOrchestrator:
 
         # Final reboot
         self.px.reboot_vm(vmid)
-        logger.info("  Final reboot initiated.")
+        logger.info("  Final reboot initiated. Waiting 120s for VM to start cleanly ...")
+        time.sleep(120)
 
     # ------------------------------------------------------------------
     # Helpers
