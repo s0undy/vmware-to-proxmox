@@ -376,6 +376,33 @@ class ProxmoxClient:
         data = self.api.nodes(node).qemu(vmid).status.current.get()
         return data.get("status", "unknown")
 
+    def get_guest_ip(self, vmid: int) -> str | None:
+        """Return the primary IPv4 address reported by the QEMU guest agent.
+
+        Returns None if the guest agent is unavailable or no suitable
+        address is found.
+        """
+        node = self.config.node
+        try:
+            result = self.api.nodes(node).qemu(vmid).agent("network-get-interfaces").get()
+        except Exception:
+            return None
+
+        interfaces = result.get("result", result) if isinstance(result, dict) else result
+        if not isinstance(interfaces, list):
+            return None
+
+        for iface in interfaces:
+            name = iface.get("name", "")
+            if name == "lo" or name.startswith("Loopback"):
+                continue
+            for addr in iface.get("ip-addresses", []):
+                if addr.get("ip-address-type") == "ipv4":
+                    ip = addr.get("ip-address", "")
+                    if ip and not ip.startswith("127."):
+                        return ip
+        return None
+
     # ------------------------------------------------------------------
     # SSH transport (for file operations on the Proxmox node)
     # ------------------------------------------------------------------

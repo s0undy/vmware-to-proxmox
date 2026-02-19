@@ -27,11 +27,18 @@ class MigrationOrchestrator:
     # Public
     # ------------------------------------------------------------------
 
-    def run(self):
-        """Execute the full migration workflow."""
+    def run(self) -> dict:
+        """Execute the full migration workflow.
+
+        Returns:
+            Dict with vm_name, final_storage, elapsed_seconds, and ip_address.
+        """
+        start_time = time.monotonic()
+        vm_name = self.config.migration.vm_name
+
         logger.info("=" * 60)
         logger.info("VMware-to-Proxmox Migration")
-        logger.info("  VM:                  %s", self.config.migration.vm_name)
+        logger.info("  VM:                  %s", vm_name)
         logger.info("  Migration datastore: %s", self.config.migration.migration_datastore)
         logger.info("  Proxmox storage:     %s", self.config.migration.proxmox_storage)
         if self.config.migration.proxmox_final_storage:
@@ -44,7 +51,7 @@ class MigrationOrchestrator:
 
         self._connect()
 
-        vm = self.vc.get_vm_by_name(self.config.migration.vm_name)
+        vm = self.vc.get_vm_by_name(vm_name)
         logger.info("Found VM: %s  (power: %s)", vm.name, vm.runtime.powerState)
 
         steps = [
@@ -74,7 +81,30 @@ class MigrationOrchestrator:
             logger.info("-" * 40)
             fn(vm)
 
+        # Query guest agent for primary IP address
+        ip_address = None
+        if not self.dry_run:
+            vmid = self._resolve_vmid()
+            self._wait_for_vm_ready(vmid)
+            logger.info("  Waiting for QEMU guest agent ...")
+            try:
+                self.px.wait_for_guest_agent(vmid)
+                ip_address = self.px.get_guest_ip(vmid)
+            except Exception:
+                logger.warning("  Could not retrieve IP from guest agent.")
+
+        elapsed = time.monotonic() - start_time
+        minutes, seconds = divmod(int(elapsed), 60)
+
         self._print_next_steps()
+        logger.info("Migration of %s completed in %dm %ds", vm_name, minutes, seconds)
+
+        return {
+            "vm_name": vm_name,
+            "final_storage": self.config.migration.proxmox_final_storage or self.config.migration.proxmox_storage,
+            "elapsed_seconds": int(elapsed),
+            "ip_address": ip_address,
+        }
 
     # ------------------------------------------------------------------
     # Connection
@@ -125,7 +155,7 @@ class MigrationOrchestrator:
         for i, d in enumerate(vm_config["disks"]):
             logger.info("  Disk scsi%d: %.1f GB  (%s)", i, d["size_gb"], d["label"])
         for i, n in enumerate(vm_config["nics"]):
-            logger.info("  NIC  net%d:  %s  MAC %s", i, n["label"], n["mac"])
+            logger.info("  NIC  net%d:  %s", i, n["label"])
 
         if self.dry_run:
             logger.info("  DRY RUN: would create Proxmox VM")
@@ -198,6 +228,8 @@ class MigrationOrchestrator:
         logger.info("  Sending shutdown signal ...")
         self.vc.shutdown_guest(vm)
         logger.info("  VM is powered off.")
+        logger.info("  Waiting 30s for clean shutdown before modifying Proxmox ...")
+        time.sleep(30)
 
     def _step_7_rewrite_vmdk_descriptors(self, vm):
         vm_config = self._resolve_vm_config(vm)
@@ -229,8 +261,8 @@ class MigrationOrchestrator:
             return
 
         self.px.start_vm(vmid)
-        logger.info("  VM %d start command sent. Waiting 20s for VM to start ...", vmid)
-        time.sleep(20)
+        logger.info("  VM %d start command sent. Waiting 30s for VM to start cleanly ...", vmid)
+        time.sleep(30)
         logger.info("  Ready to proceed.")
 
     def _step_9_move_disks(self, vm):
@@ -272,8 +304,8 @@ class MigrationOrchestrator:
                 return
             logger.info("  Starting VM after disk move ...")
             self.px.start_vm(vmid)
-            logger.info("  VM %d start command sent. Waiting 20s for VM to start ...", vmid)
-            time.sleep(20)
+            logger.info("  VM %d start command sent. Waiting 30s for VM to start cleanly ...", vmid)
+            time.sleep(30)
             logger.info("  Ready to proceed.")
 
     def _step_10_verify(self, vm):

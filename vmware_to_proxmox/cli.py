@@ -140,12 +140,14 @@ def setup_logging(verbose: bool = False):
     logging.getLogger("requests").setLevel(logging.WARNING)
 
 
-def _run_sequential(orchestrators: list[MigrationOrchestrator]) -> list[str]:
-    """Run migrations one at a time; return list of failed VM names."""
+def _run_sequential(orchestrators: list[MigrationOrchestrator]) -> tuple[list[str], list[dict]]:
+    """Run migrations one at a time; return (failed VM names, results)."""
     failures = []
+    results = []
     for orch in orchestrators:
         try:
-            orch.run()
+            result = orch.run()
+            results.append(result)
         except MigrationError as exc:
             logger.error("")
             logger.error("MIGRATION FAILED [%s]: %s", orch.config.migration.vm_name, exc)
@@ -154,19 +156,21 @@ def _run_sequential(orchestrators: list[MigrationOrchestrator]) -> list[str]:
                 orch.config.migration.vm_name,
             )
             failures.append(orch.config.migration.vm_name)
-    return failures
+    return failures, results
 
 
-def _run_parallel(orchestrators: list[MigrationOrchestrator]) -> list[str]:
-    """Run all migrations concurrently; return list of failed VM names."""
+def _run_parallel(orchestrators: list[MigrationOrchestrator]) -> tuple[list[str], list[dict]]:
+    """Run all migrations concurrently; return (failed VM names, results)."""
     failures = []
+    results = []
     with ThreadPoolExecutor(max_workers=len(orchestrators)) as executor:
         future_to_orch = {executor.submit(orch.run): orch for orch in orchestrators}
         for future in as_completed(future_to_orch):
             orch = future_to_orch[future]
             vm_name = orch.config.migration.vm_name
             try:
-                future.result()
+                result = future.result()
+                results.append(result)
             except MigrationError as exc:
                 logger.error("")
                 logger.error("MIGRATION FAILED [%s]: %s", vm_name, exc)
@@ -175,7 +179,25 @@ def _run_parallel(orchestrators: list[MigrationOrchestrator]) -> list[str]:
                     vm_name,
                 )
                 failures.append(vm_name)
-    return failures
+    return failures, results
+
+
+def _print_summary(results: list[dict]) -> None:
+    """Print a final summary table of all migrated VMs."""
+    if not results:
+        return
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("MIGRATION SUMMARY")
+    logger.info("=" * 60)
+    logger.info("  %-25s %-15s %-16s %s", "VM Name", "Storage", "IP Address", "Duration")
+    logger.info("  %-25s %-15s %-16s %s", "-" * 25, "-" * 15, "-" * 16, "-" * 10)
+    for r in results:
+        minutes, seconds = divmod(r["elapsed_seconds"], 60)
+        duration = f"{minutes}m {seconds}s"
+        ip = r.get("ip_address") or "N/A"
+        logger.info("  %-25s %-15s %-16s %s", r["vm_name"], r["final_storage"], ip, duration)
+    logger.info("=" * 60)
 
 
 def main():
@@ -205,12 +227,14 @@ def main():
     try:
         if runtime["parallel"] and len(orchestrators) > 1:
             logger.info("Running %d migrations in parallel.", len(orchestrators))
-            failures = _run_parallel(orchestrators)
+            failures, results = _run_parallel(orchestrators)
         else:
-            failures = _run_sequential(orchestrators)
+            failures, results = _run_sequential(orchestrators)
     except KeyboardInterrupt:
         logger.warning("\nInterrupted by user.")
         sys.exit(130)
+
+    _print_summary(results)
 
     if failures:
         logger.error("")
