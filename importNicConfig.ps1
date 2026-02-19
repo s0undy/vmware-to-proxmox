@@ -33,6 +33,9 @@ for ($i = 0; $i -lt $configs.Count; $i++) {
     Write-Host "Applying config $i to '$alias' (ifIndex $($adapter.InterfaceIndex))..."
     Write-Host "  IP: $($config.ipv4Address)/$($config.prefixLength)  GW: $($config.defaultGateway)  DNS: $($config.dnsServers)"
 
+    # Disable DHCP so the static IP persists across reboots
+    Set-NetIPInterface -InterfaceIndex $adapter.InterfaceIndex -Dhcp Disabled -ErrorAction SilentlyContinue
+
     # Clear existing IP addresses and routes
     try {
         Remove-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue
@@ -48,7 +51,12 @@ for ($i = 0; $i -lt $configs.Count; $i++) {
     if ($config.defaultGateway) {
         $ipParams["DefaultGateway"] = $config.defaultGateway
     }
-    New-NetIPAddress @ipParams
+    try {
+        New-NetIPAddress @ipParams -ErrorAction Stop
+    } catch {
+        Write-Warning "New-NetIPAddress failed for adapter '$alias': $_"
+        exit 1
+    }
 
     # Set DNS
     if ($config.dnsServers) {

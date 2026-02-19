@@ -142,7 +142,7 @@ class ProxmoxClient:
             "boot": "order=scsi0",
             "agent": "1",
             "numa": 1,
-            "tablet": 0,
+            "tablet": 1,
             "ide0": "none,media=cdrom",
         }
 
