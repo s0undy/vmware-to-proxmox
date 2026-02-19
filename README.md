@@ -2,6 +2,8 @@
 
 Migrates Windows VMs from VMware vCenter to Proxmox VE. Connects to both platforms and automates every step so the VM boots cleanly on its new host.
 
+Implements the [Attach Disk & Move Disk (minimal downtime)](https://pve.proxmox.com/wiki/Migrate_to_Proxmox_VE#Attach_Disk_&_Move_Disk_(minimal_downtime)) method from the Proxmox wiki.
+
 ## Migration steps
 
 1. Storage vMotion VM to a shared datastore
@@ -101,5 +103,8 @@ A single VM via CLI: `python migrate.py --vm-name "my-vm"`
 
 ---
 
-This project was built with assistance from AI (Claude).
+
+
+# This project was built with assistance from AI (Claude).
+All code has been read by a human. AI makes mistakes, and so does humans. If you intend to use this in a production environment please do your own code review(by human hands) 
 
