@@ -103,6 +103,12 @@ A single VM via CLI: `python migrate.py --vm-name "my-vm"`
 
 ---
 
+# Credits
+The content in this folder has been heavily inspired by different community members. I want to say thank you for making the initial scripts public. They have been modified to fit the workflow of this project.
+
+- enable-vioscsi-to-load-on-boot.ps1 | Credits to [croit/derhanns](https://github.com/croit/load-virtio-scsi-on-boot)
+- importNicConfig.ps1 & exportNicConfigs.ps1 | Credits to [lucavornheder](https://forum.proxmox.com/threads/netzwerksettings-bei-der-migration-von-windows-vms-zu-pve-%C3%BCbernehmen.175997/)
+- purge-vmware-tools.ps1 | Credits to all the people over at this [gist](https://gist.github.com/broestls/f872872a00acee2fca02017160840624)
 
 
 # This project was built with assistance from AI (Claude).
