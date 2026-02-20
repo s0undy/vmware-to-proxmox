@@ -14,15 +14,14 @@ logger = logging.getLogger(__name__)
 TOTAL_STEPS = 14
 
 # -- Timing constants (seconds) ------------------------------------------------
-SHUTDOWN_SETTLE_SECONDS = 30       # Post-shutdown grace before modifying Proxmox
+SHUTDOWN_SETTLE_SECONDS = 15       # Post-shutdown grace before modifying Proxmox
 VM_START_SETTLE_SECONDS = 30       # Wait after VM power-on command
-VM_FULL_BOOT_SECONDS = 120         # Full Windows boot after verification
-VIRTIO_INSTALL_SETTLE_SECONDS = 120  # VM settle after VirtIO driver install
+VM_FULL_BOOT_SECONDS = 40          # Full Windows boot after verification
+VIRTIO_INSTALL_SETTLE_SECONDS = 20   # VM settle after VirtIO driver install
 ISO_MOUNT_WAIT_SECONDS = 5         # ISO availability after mount
 PRE_REBOOT_PAUSE_SECONDS = 10      # Grace period before reboot (step 12)
-POST_REBOOT_BOOT_SECONDS = 120     # Windows boot after reboot (steps 12, 13)
+POST_REBOOT_BOOT_SECONDS = 40      # Windows boot after reboot (steps 12, 13)
 NIC_RESTORE_PRE_REBOOT_SECONDS = 15  # Grace period before reboot (step 13)
-FINAL_REBOOT_BOOT_SECONDS = 120    # Windows boot after final reboot (step 14)
 VM_READY_TIMEOUT_SECONDS = 300     # Max wait for VM to reach 'running'
 VM_READY_POLL_SECONDS = 5          # Poll interval for VM ready check
 
@@ -374,7 +373,8 @@ class MigrationOrchestrator:
             return
 
         # Wait for the VM to be running and Windows to start up
-        self._wait_for_vm_ready(vmid)
+        settle = 10 if self.config.migration.enable_nics_on_boot else 30
+        self._wait_for_vm_ready(vmid, settle_seconds=settle)
 
         # Mount the VirtIO ISO
         self.px.mount_iso(vmid, iso_storage, iso_filename)
@@ -435,7 +435,8 @@ class MigrationOrchestrator:
             return
 
         # Wait for the VM to be running and Windows to start up
-        self._wait_for_vm_ready(vmid)
+        settle = 10 if self.config.migration.enable_nics_on_boot else 30
+        self._wait_for_vm_ready(vmid, settle_seconds=settle)
 
         logger.info("  Waiting for QEMU guest agent ...")
         self.px.wait_for_guest_agent(vmid)
@@ -470,7 +471,8 @@ class MigrationOrchestrator:
             return
 
         # Wait for the VM to be running and Windows to start up
-        self._wait_for_vm_ready(vmid)
+        settle = 10 if self.config.migration.enable_nics_on_boot else 30
+        self._wait_for_vm_ready(vmid, settle_seconds=settle)
 
         logger.info("  Waiting for QEMU guest agent ...")
         self.px.wait_for_guest_agent(vmid)
@@ -519,8 +521,10 @@ class MigrationOrchestrator:
 
         # Final reboot
         self.px.reboot_vm(vmid)
-        logger.info("  Final reboot initiated. Waiting %ds for VM to start cleanly ...", self._effective_wait(FINAL_REBOOT_BOOT_SECONDS))
-        self._sleep(FINAL_REBOOT_BOOT_SECONDS)
+        logger.info("  Final reboot initiated. Waiting 20s for VM to boot cleanly ...")
+        time.sleep(20)
+        logger.info("  Waiting 10s for Windows to start up ...")
+        time.sleep(10)
 
     # ------------------------------------------------------------------
     # Helpers
