@@ -44,6 +44,7 @@ class MigrationConfig:
     migration_datastore: str
     proxmox_storage: str
     proxmox_final_storage: str = ""
+    os_type: str = "auto"
     start_vm_before_move: bool = True
     enable_nics_on_boot: bool = False
     proxmox_vmid: int = 0
@@ -145,15 +146,19 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     px_ssh_port = int(_pick(args.proxmox_ssh_port, px_yaml.get("ssh_port"), 22))
 
     # ------------------------------------------------------------------
-    # Guest
+    # Guest (optional when os_type is "other" — no guest operations needed)
     # ------------------------------------------------------------------
-    guest_user = args.guest_user or guest_yaml.get("user")
-    if not guest_user:
-        raise ConfigurationError("Guest OS user is required")
-    guest_password = _resolve_password(
-        args.guest_password, "GUEST_PASSWORD",
-        guest_yaml.get("password"), "Guest OS password",
-    )
+    guest_user = args.guest_user or guest_yaml.get("user", "")
+    guest_password_raw = args.guest_password or os.environ.get("GUEST_PASSWORD") or guest_yaml.get("password", "")
+    if os_type == "other":
+        guest_password = guest_password_raw
+    else:
+        if not guest_user:
+            raise ConfigurationError("Guest OS user is required")
+        guest_password = _resolve_password(
+            args.guest_password, "GUEST_PASSWORD",
+            guest_yaml.get("password"), "Guest OS password",
+        )
 
     # ------------------------------------------------------------------
     # Shared infrastructure config (same for all VMs)
@@ -188,6 +193,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     migration_ds = args.migration_datastore or mig_yaml.get("migration_datastore")
     px_storage = args.proxmox_storage or mig_yaml.get("proxmox_storage")
     px_final_storage = args.proxmox_final_storage or mig_yaml.get("proxmox_final_storage", "")
+    os_type = _pick(args.os_type, mig_yaml.get("os_type"), "auto")
     start_vm_before_move = bool(_pick(
         args.start_vm_before_move, mig_yaml.get("start_vm_before_move"), True
     ))
@@ -258,6 +264,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         migration_datastore=migration_ds,
         proxmox_storage=px_storage,
         proxmox_final_storage=px_final_storage,
+        os_type=os_type,
         start_vm_before_move=start_vm_before_move,
         enable_nics_on_boot=enable_nics_on_boot,
         proxmox_vmid=0,
