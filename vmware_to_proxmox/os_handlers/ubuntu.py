@@ -36,9 +36,9 @@ class UbuntuHandler(OSHandler):
             return
 
         cmd = (
-            "apt -y install qemu-guest-agent && "
-            "systemctl enable --now qemu-guest-agent && "
-            "systemctl restart qemu-guest-agent"
+            "sudo apt -y install qemu-guest-agent && "
+            "sudo systemctl enable --now qemu-guest-agent && "
+            "sudo systemctl restart qemu-guest-agent"
         )
         exit_code = guest_ops.run_bash(vm, cmd, timeout_seconds=300)
         if exit_code != 0:
