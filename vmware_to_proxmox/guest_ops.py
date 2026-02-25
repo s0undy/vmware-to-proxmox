@@ -1,5 +1,6 @@
 """vCenter guest operations — run commands inside a VM."""
 
+import base64
 import logging
 import time
 
@@ -100,6 +101,38 @@ class GuestOperations:
         logger.debug("  Guest exec: %s -c %r", BASH_EXE, command)
         pid = pm.StartProgramInGuest(vm, self.creds, spec)
         logger.info("  Started guest process PID %d", pid)
+        return self._wait_for_process(vm, pid, timeout_seconds)
+
+    def run_sudo_bash(
+        self,
+        vm: vim.VirtualMachine,
+        command: str,
+        timeout_seconds: int = 600,
+    ) -> int:
+        """Run a bash command as root via ``sudo -S`` inside the guest.
+
+        Uses the guest password (already stored in ``self.creds``) piped
+        through stdin so that sudo does not need a TTY — VMware Tools
+        guest operations run with ``interactiveSession=False``.
+
+        The password is base64-encoded in the command line to avoid
+        shell-escaping issues with special characters.
+        """
+        pm = self.vc.content.guestOperationsManager.processManager
+
+        b64_pass = base64.b64encode(self.creds.password.encode()).decode()
+        full_cmd = (
+            f"echo {b64_pass} | base64 -d | "
+            f"sudo -S /bin/bash -c {command!r}"
+        )
+
+        spec = vim.vm.guest.ProcessManager.ProgramSpec()
+        spec.programPath = BASH_EXE
+        spec.arguments = f'-c {full_cmd!r}'
+
+        logger.debug("  Guest exec (sudo): %s -c <redacted>", BASH_EXE)
+        pid = pm.StartProgramInGuest(vm, self.creds, spec)
+        logger.info("  Started guest process PID %d (sudo)", pid)
         return self._wait_for_process(vm, pid, timeout_seconds)
 
     def run_executable(

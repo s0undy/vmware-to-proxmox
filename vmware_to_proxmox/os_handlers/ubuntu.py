@@ -36,12 +36,12 @@ class UbuntuHandler(OSHandler):
             return
 
         cmd = (
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q && "
-            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent && "
-            "sudo systemctl enable --now qemu-guest-agent && "
-            "sudo systemctl restart qemu-guest-agent"
+            "DEBIAN_FRONTEND=noninteractive apt-get update -q && "
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent && "
+            "systemctl enable --now qemu-guest-agent && "
+            "systemctl restart qemu-guest-agent"
         )
-        exit_code = guest_ops.run_bash(vm, cmd, timeout_seconds=300)
+        exit_code = guest_ops.run_sudo_bash(vm, cmd, timeout_seconds=300)
         if exit_code != 0:
             raise GuestOperationError(
                 f"qemu-guest-agent installation failed with code {exit_code}"
