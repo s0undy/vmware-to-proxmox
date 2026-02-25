@@ -4,25 +4,33 @@ import logging
 import time
 
 from .config import AppConfig
-from .exceptions import MigrationError, ProxmoxOperationError
+from .exceptions import MigrationError, ProxmoxOperationError, ProxmoxConnectionError
 from .guest_ops import GuestOperations
 from .os_handlers import detect_os_type, get_os_handler
-from .os_handlers.base import OSHandler
+from .os_handlers.base import OSHandler, StepContext
 from .proxmox import ProxmoxClient
 from .vcenter import VCenterClient
 
 logger = logging.getLogger(__name__)
+
+
+class _VMLoggerAdapter(logging.LoggerAdapter):
+    """Prefixes all log messages with [vm_name] for multi-VM clarity."""
+
+    def process(self, msg, kwargs):
+        return f"[{self.extra['vm']}] {msg}", kwargs
+
 
 TOTAL_STEPS = 14
 
 # -- Timing constants (seconds) ------------------------------------------------
 SHUTDOWN_SETTLE_SECONDS = 15       # Post-shutdown grace before modifying Proxmox
 VM_START_SETTLE_SECONDS = 30       # Wait after VM power-on command
-VM_FULL_BOOT_SECONDS = 40          # Full Windows boot after verification
+VM_FULL_BOOT_SECONDS = 40         # Full boot after verification
 VIRTIO_INSTALL_SETTLE_SECONDS = 20   # VM settle after VirtIO driver install
 ISO_MOUNT_WAIT_SECONDS = 5         # ISO availability after mount
 PRE_REBOOT_PAUSE_SECONDS = 10      # Grace period before reboot (step 12)
-POST_REBOOT_BOOT_SECONDS = 40      # Windows boot after reboot (steps 12, 13)
+POST_REBOOT_BOOT_SECONDS = 40      # Boot after reboot (steps 12, 13)
 NIC_RESTORE_PRE_REBOOT_SECONDS = 15  # Grace period before reboot (step 13)
 VM_READY_TIMEOUT_SECONDS = 300     # Max wait for VM to reach 'running'
 VM_READY_POLL_SECONDS = 5          # Poll interval for VM ready check
@@ -38,6 +46,7 @@ class MigrationOrchestrator:
         self.vc = VCenterClient(config.vcenter)
         self.px = ProxmoxClient(config.proxmox)
         self.guest_ops = None
+        self.log = _VMLoggerAdapter(logger, {"vm": config.migration.vm_name})
 
     # ------------------------------------------------------------------
     # Public
@@ -52,33 +61,33 @@ class MigrationOrchestrator:
         start_time = time.monotonic()
         vm_name = self.config.migration.vm_name
 
-        logger.info("=" * 60)
-        logger.info("VMware-to-Proxmox Migration")
-        logger.info("  VM:                  %s", vm_name)
-        logger.info("  Migration datastore: %s", self.config.migration.migration_datastore)
-        logger.info("  Proxmox storage:     %s", self.config.migration.proxmox_storage)
+        self.log.info("=" * 60)
+        self.log.info("VMware-to-Proxmox Migration")
+        self.log.info("  VM:                  %s", vm_name)
+        self.log.info("  Migration datastore: %s", self.config.migration.migration_datastore)
+        self.log.info("  Proxmox storage:     %s", self.config.migration.proxmox_storage)
         if self.config.migration.proxmox_final_storage:
-            logger.info("  Proxmox final store: %s", self.config.migration.proxmox_final_storage)
+            self.log.info("  Proxmox final store: %s", self.config.migration.proxmox_final_storage)
         if self.dry_run:
-            logger.info("  *** DRY RUN — no changes will be made ***")
+            self.log.info("  *** DRY RUN — no changes will be made ***")
         if self.config.migration.enable_nics_on_boot:
-            logger.info("  NICs on boot:        enabled (reduced wait timers)")
+            self.log.info("  NICs on boot:        enabled (reduced wait timers)")
         if self.skip_to > 1:
-            logger.info("  Resuming from step %d", self.skip_to)
-        logger.info("=" * 60)
+            self.log.info("  Resuming from step %d", self.skip_to)
+        self.log.info("=" * 60)
 
         self._connect()
 
         vm = self.vc.get_vm_by_name(vm_name)
-        logger.info("Found VM: %s  (power: %s)", vm.name, vm.runtime.powerState)
+        self.log.info("Found VM: %s  (power: %s)", vm.name, vm.runtime.powerState)
 
         # Auto-detect OS type from vCenter guestId if not set explicitly
         if self.os_handler is None:
             guest_id = vm.config.guestId
             detected = detect_os_type(guest_id)
-            logger.info("  Auto-detected OS type: %s  (guestId: %s)", detected, guest_id)
+            self.log.info("  Auto-detected OS type: %s  (guestId: %s)", detected, guest_id)
             self.os_handler = get_os_handler(detected)
-        logger.info("  OS handler:          %s", self.os_handler.os_label)
+        self.log.info("  OS handler:          %s", self.os_handler.os_label)
 
         steps = [
             (1, "Storage vMotion", self._step_1_storage_vmotion),
@@ -99,35 +108,35 @@ class MigrationOrchestrator:
 
         for num, label, fn in steps:
             if self.skip_to > num:
-                logger.info("")
-                logger.info("SKIP step %d/%d: %s", num, TOTAL_STEPS, label)
+                self.log.info("")
+                self.log.info("SKIP step %d/%d: %s", num, TOTAL_STEPS, label)
                 continue
-            logger.info("")
-            logger.info("STEP %d/%d: %s", num, TOTAL_STEPS, label)
-            logger.info("-" * 40)
+            self.log.info("")
+            self.log.info("STEP %d/%d: %s", num, TOTAL_STEPS, label)
+            self.log.info("-" * 40)
             step_start = time.monotonic()
             fn(vm)
             step_elapsed = time.monotonic() - step_start
             step_min, step_sec = divmod(int(step_elapsed), 60)
-            logger.info("  Step %d completed in %dm %ds", num, step_min, step_sec)
+            self.log.info("  Step %d completed in %dm %ds", num, step_min, step_sec)
 
         # Query guest agent for primary IP address
         ip_address = None
         if not self.dry_run:
             vmid = self._resolve_vmid()
             self._wait_for_vm_ready(vmid)
-            logger.info("  Waiting for QEMU guest agent ...")
+            self.log.info("  Waiting for QEMU guest agent ...")
             try:
                 self.px.wait_for_guest_agent(vmid)
                 ip_address = self.px.get_guest_ip(vmid)
-            except Exception:
-                logger.warning("  Could not retrieve IP from guest agent.")
+            except (ProxmoxOperationError, ProxmoxConnectionError, OSError):
+                self.log.warning("  Could not retrieve IP from guest agent.")
 
         elapsed = time.monotonic() - start_time
         minutes, seconds = divmod(int(elapsed), 60)
 
         self._print_next_steps()
-        logger.info("Migration of %s completed in %dm %ds", vm_name, minutes, seconds)
+        self.log.info("Migration of %s completed in %dm %ds", vm_name, minutes, seconds)
 
         return {
             "vm_name": vm_name,
@@ -141,13 +150,13 @@ class MigrationOrchestrator:
     # ------------------------------------------------------------------
 
     def _connect(self):
-        logger.info("Connecting to vCenter %s ...", self.config.vcenter.host)
+        self.log.info("Connecting to vCenter %s ...", self.config.vcenter.host)
         self.vc.connect()
-        logger.info("  Connected.")
+        self.log.info("  Connected.")
 
-        logger.info("Connecting to Proxmox %s ...", self.config.proxmox.host)
+        self.log.info("Connecting to Proxmox %s ...", self.config.proxmox.host)
         self.px.connect()
-        logger.info("  Connected.")
+        self.log.info("  Connected.")
 
         # Guest operations require credentials — skip when none provided (e.g. os_type=other)
         if self.config.guest.user and self.config.guest.password:
@@ -159,43 +168,43 @@ class MigrationOrchestrator:
 
     def _step_1_storage_vmotion(self, vm):
         ds = self.vc.get_datastore_by_name(self.config.migration.migration_datastore)
-        logger.info("  Target datastore: %s", ds.name)
-        logger.info("  Free space:       %.1f GB", ds.summary.freeSpace / (1024 ** 3))
+        self.log.info("  Target datastore: %s", ds.name)
+        self.log.info("  Free space:       %.1f GB", ds.summary.freeSpace / (1024 ** 3))
 
         if self.vc.vm_is_on_datastore(vm, ds):
-            logger.info("  VM is already on datastore '%s' — skipping vMotion.", ds.name)
+            self.log.info("  VM is already on datastore '%s' — skipping vMotion.", ds.name)
             return
 
         if self.dry_run:
-            logger.info("  DRY RUN: would relocate VM to %s", ds.name)
+            self.log.info("  DRY RUN: would relocate VM to %s", ds.name)
             return
 
-        logger.info("  Relocating VM (this may take a while) ...")
+        self.log.info("  Relocating VM (this may take a while) ...")
         self.vc.storage_vmotion(vm, ds)
-        logger.info("  Storage vMotion complete.")
+        self.log.info("  Storage vMotion complete.")
 
     def _step_2_create_proxmox_vm(self, vm):
         vm_config = self.vc.get_vm_config(vm)
         self._vm_config = vm_config
 
-        logger.info("  CPUs:     %d  (%d sockets x %d cores)",
-                     vm_config["num_cpus"],
-                     max(1, vm_config["num_cpus"] // vm_config["num_cores_per_socket"]),
-                     vm_config["num_cores_per_socket"])
-        logger.info("  Memory:   %d MB", vm_config["memory_mb"])
-        logger.info("  Firmware: %s", vm_config["firmware"])
+        self.log.info("  CPUs:     %d  (%d sockets x %d cores)",
+                      vm_config["num_cpus"],
+                      max(1, vm_config["num_cpus"] // vm_config["num_cores_per_socket"]),
+                      vm_config["num_cores_per_socket"])
+        self.log.info("  Memory:   %d MB", vm_config["memory_mb"])
+        self.log.info("  Firmware: %s", vm_config["firmware"])
         for i, d in enumerate(vm_config["disks"]):
-            logger.info("  Disk scsi%d: %.1f GB  (%s)", i, d["size_gb"], d["label"])
+            self.log.info("  Disk scsi%d: %.1f GB  (%s)", i, d["size_gb"], d["label"])
         for i, n in enumerate(vm_config["nics"]):
-            logger.info("  NIC  net%d:  %s", i, n["label"])
+            self.log.info("  NIC  net%d:  %s", i, n["label"])
 
         if self.dry_run:
-            logger.info("  DRY RUN: would create Proxmox VM")
+            self.log.info("  DRY RUN: would create Proxmox VM")
             return
 
         vmid = self.px.create_vm(vm_config, self.config.migration)
         self._vmid = vmid
-        logger.info("  Proxmox VM created — VMID %d", vmid)
+        self.log.info("  Proxmox VM created — VMID %d", vmid)
 
     def _step_3_export_nic_config(self, vm):
         self.os_handler.step_3_export_nic_config(
@@ -211,13 +220,13 @@ class MigrationOrchestrator:
 
     def _step_6_shutdown(self, vm):
         if self.dry_run:
-            logger.info("  DRY RUN: would shut down %s", vm.name)
+            self.log.info("  DRY RUN: would shut down %s", vm.name)
             return
 
-        logger.info("  Sending shutdown signal ...")
+        self.log.info("  Sending shutdown signal ...")
         self.vc.shutdown_guest(vm)
-        logger.info("  VM is powered off.")
-        logger.info("  Waiting %ds for clean shutdown before modifying Proxmox ...", SHUTDOWN_SETTLE_SECONDS)
+        self.log.info("  VM is powered off.")
+        self.log.info("  Waiting %ds for clean shutdown ...", SHUTDOWN_SETTLE_SECONDS)
         time.sleep(SHUTDOWN_SETTLE_SECONDS)
 
     def _step_7_rewrite_vmdk_descriptors(self, vm):
@@ -226,8 +235,8 @@ class MigrationOrchestrator:
 
         if self.dry_run:
             for i, d in enumerate(vm_config["disks"]):
-                logger.info("  DRY RUN: would rewrite scsi%d: %s -> vm-%d-disk-%d.vmdk",
-                            i, d["filename"], vmid, i)
+                self.log.info("  DRY RUN: would rewrite scsi%d: %s -> vm-%d-disk-%d.vmdk",
+                              i, d["filename"], vmid, i)
             return
 
         self.px.rewrite_vmdk_descriptors(
@@ -235,24 +244,25 @@ class MigrationOrchestrator:
             vm_config=vm_config,
             storage_name=self.config.migration.proxmox_storage,
         )
-        logger.info("  All VMDK descriptors rewritten.")
+        self.log.info("  All VMDK descriptors rewritten.")
 
     def _step_8_start_vm(self, vm):
         vmid = self._resolve_vmid()
         start_before = self.config.migration.start_vm_before_move
 
         if not start_before:
-            logger.info("  start_vm_before_move=false — VM will start after disks are moved.")
+            self.log.info("  start_vm_before_move=false — VM will start after disks are moved.")
             return
 
         if self.dry_run:
-            logger.info("  DRY RUN: would start VMID %d", vmid)
+            self.log.info("  DRY RUN: would start VMID %d", vmid)
             return
 
         self.px.start_vm(vmid)
-        logger.info("  VM %d start command sent. Waiting %ds for VM to start cleanly ...", vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
+        self.log.info("  VM %d start command sent. Waiting %ds for VM to boot ...",
+                      vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
         self._sleep(VM_START_SETTLE_SECONDS)
-        logger.info("  Ready to proceed.")
+        self.log.info("  Ready to proceed.")
 
     def _step_9_move_disks(self, vm):
         vmid = self._resolve_vmid()
@@ -272,30 +282,31 @@ class MigrationOrchestrator:
             disks_to_move.append("efidisk0")
 
         total = len(disks_to_move)
-        logger.info("  %d disk(s) to move.", total)
+        self.log.info("  %d disk(s) to move.", total)
 
         # Move disks one at a time with progress
         for idx, disk_name in enumerate(disks_to_move, start=1):
             pct = int(idx / total * 100)
             if self.dry_run:
-                logger.info("  DRY RUN: [%d/%d %3d%%] would move %s -> %s (qcow2)",
-                            idx, total, pct, disk_name, final_storage)
+                self.log.info("  DRY RUN: [%d/%d %3d%%] would move %s -> %s (qcow2)",
+                              idx, total, pct, disk_name, final_storage)
                 continue
-            logger.info("  [%d/%d %3d%%] Moving %s ...", idx, total, pct, disk_name)
+            self.log.info("  [%d/%d %3d%%] Moving %s ...", idx, total, pct, disk_name)
             self.px.move_disk(vmid, disk_name, final_storage)
 
-        logger.info("  All disks moved to %s.", final_storage)
+        self.log.info("  All disks moved to %s.", final_storage)
 
         # Start VM after move if not started in step 8
         if not start_before:
             if self.dry_run:
-                logger.info("  DRY RUN: would start VMID %d after move", vmid)
+                self.log.info("  DRY RUN: would start VMID %d after move", vmid)
                 return
-            logger.info("  Starting VM after disk move ...")
+            self.log.info("  Starting VM after disk move ...")
             self.px.start_vm(vmid)
-            logger.info("  VM %d start command sent. Waiting %ds for VM to start cleanly ...", vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
+            self.log.info("  VM %d start command sent. Waiting %ds for VM to boot ...",
+                          vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
             self._sleep(VM_START_SETTLE_SECONDS)
-            logger.info("  Ready to proceed.")
+            self.log.info("  Ready to proceed.")
 
     def _step_10_verify(self, vm):
         vmid = self._resolve_vmid()
@@ -303,12 +314,12 @@ class MigrationOrchestrator:
         final_storage = self.config.migration.proxmox_final_storage
 
         if self.dry_run:
-            logger.info("  DRY RUN: would verify VMID %d is running on %s", vmid, final_storage)
+            self.log.info("  DRY RUN: would verify VMID %d is running on %s", vmid, final_storage)
             return
 
         # Verify VM is running
         status = self.px.get_vm_status(vmid)
-        logger.info("  VM %d status: %s", vmid, status)
+        self.log.info("  VM %d status: %s", vmid, status)
         if status != "running":
             raise ProxmoxOperationError(
                 f"VM {vmid} is not running (status: {status})"
@@ -326,36 +337,40 @@ class MigrationOrchestrator:
                 raise ProxmoxOperationError(
                     f"Disk {key} is not on final storage {final_storage}: {value}"
                 )
-            logger.info("  %s: %s", key, value)
+            self.log.info("  %s: %s", key, value)
 
-        logger.info("  Verification passed — all disks on %s, VM running.", final_storage)
+        self.log.info("  Verification passed — all disks on %s, VM running.", final_storage)
 
-        logger.info("  Waiting %ds for VM to fully boot ...", self._effective_wait(VM_FULL_BOOT_SECONDS))
+        self.log.info("  Waiting %ds for VM to fully boot ...", self._effective_wait(VM_FULL_BOOT_SECONDS))
         self._sleep(VM_FULL_BOOT_SECONDS)
 
+    def _build_step_context(self) -> StepContext:
+        """Build a StepContext for OS handler steps 11-13."""
+        return StepContext(
+            vmid=self._resolve_vmid(),
+            px=self.px,
+            config=self.config,
+            dry_run=self.dry_run,
+            wait_for_vm_ready=self._wait_for_vm_ready,
+            effective_wait=self._effective_wait,
+            sleep_fn=self._sleep,
+            log=self.log,
+        )
+
     def _step_11_install_virtio_drivers(self, vm):
-        vmid = self._resolve_vmid()
-        self.os_handler.step_11_install_virtio_drivers(
-            vmid, self.px, self.config, self.dry_run,
-            self._wait_for_vm_ready, self._effective_wait, self._sleep)
+        self.os_handler.step_11_install_virtio_drivers(self._build_step_context())
 
     def _step_12_purge_vmware_tools(self, vm):
-        vmid = self._resolve_vmid()
-        self.os_handler.step_12_purge_vmware_tools(
-            vmid, self.px, self.config, self.dry_run,
-            self._wait_for_vm_ready, self._effective_wait, self._sleep)
+        self.os_handler.step_12_purge_vmware_tools(self._build_step_context())
 
     def _step_13_import_nic_config(self, vm):
-        vmid = self._resolve_vmid()
-        self.os_handler.step_13_restore_nic_config(
-            vmid, self.px, self.config, self.dry_run,
-            self._wait_for_vm_ready, self._effective_wait, self._sleep)
+        self.os_handler.step_13_restore_nic_config(self._build_step_context())
 
     def _step_14_finalize(self, vm):
         vmid = self._resolve_vmid()
 
         if self.dry_run:
-            logger.info("  DRY RUN: would unmount ISO, clean up unused disks, enable NICs, and reboot VMID %d", vmid)
+            self.log.info("  DRY RUN: would unmount ISO, clean up unused disks, enable NICs, and reboot VMID %d", vmid)
             return
 
         # Unmount the VirtIO ISO
@@ -369,23 +384,25 @@ class MigrationOrchestrator:
             px_config = self.px.get_vm_config_proxmox(vmid)
             nic_keys = sorted(k for k in px_config if k.startswith("net") and k[3:].isdigit())
             for nic_key in nic_keys:
-                logger.info("  Enabling %s ...", nic_key)
+                self.log.info("  Enabling %s ...", nic_key)
                 self.px.set_nic_link_state(vmid, nic_key, link_down=False)
-            logger.info("  All NICs enabled.")
+            self.log.info("  All NICs enabled.")
         else:
-            logger.info("  NICs already enabled (enable_nics_on_boot=true), skipping.")
+            self.log.info("  NICs already enabled (enable_nics_on_boot=true), skipping.")
 
         # Final reboot — skip if NICs were already enabled on boot,
         # because step 13 (NIC restore) already performed a reboot.
         if self.config.migration.enable_nics_on_boot:
-            logger.info("  Skipping final reboot (already rebooted in step 13).")
+            self.log.info("  Skipping final reboot (already rebooted in step 13).")
         else:
             self.px.reboot_vm(vmid)
-            logger.info("  Final reboot initiated. Waiting 20s for VM to boot cleanly ...")
-            time.sleep(20)
+            self.log.info("  Final reboot initiated. Waiting %ds for VM to boot ...",
+                          self._effective_wait(20))
+            self._sleep(20)
             os_label = self.os_handler.os_label if self.os_handler else "OS"
-            logger.info("  Waiting 10s for %s to start up ...", os_label)
-            time.sleep(10)
+            self.log.info("  Waiting %ds for %s to start up ...",
+                          self._effective_wait(10), os_label)
+            self._sleep(10)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -414,7 +431,7 @@ class MigrationOrchestrator:
 
     def _wait_for_vm_ready(self, vmid: int, settle_seconds: int = 30) -> None:
         """Wait until Proxmox reports the VM as running, then wait extra time for the OS to boot."""
-        logger.info("  Waiting for VM %d to be running ...", vmid)
+        self.log.info("  Waiting for VM %d to be running ...", vmid)
         start = time.monotonic()
         status = "unknown"
         while time.monotonic() - start < VM_READY_TIMEOUT_SECONDS:
@@ -428,9 +445,10 @@ class MigrationOrchestrator:
                 f"{VM_READY_TIMEOUT_SECONDS}s (current: {status})"
             )
         os_label = self.os_handler.os_label if self.os_handler else "OS"
-        logger.info("  VM %d is running. Waiting %ds for %s to start up ...", vmid, settle_seconds, os_label)
+        self.log.info("  VM %d is running. Waiting %ds for %s to start up ...",
+                      vmid, settle_seconds, os_label)
         time.sleep(settle_seconds)
-        logger.info("  Ready to proceed.")
+        self.log.info("  Ready to proceed.")
 
     def _resolve_vm_config(self, vm):
         """Return the vCenter vm_config from step 2 or fetch it fresh."""
@@ -445,14 +463,14 @@ class MigrationOrchestrator:
 
     def _print_next_steps(self):
         from .os_handlers.other import OtherHandler
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info("MIGRATION COMPLETE")
-        logger.info("=" * 60)
-        logger.info("")
-        logger.info("The VM has been fully migrated to Proxmox.")
+        self.log.info("")
+        self.log.info("=" * 60)
+        self.log.info("MIGRATION COMPLETE")
+        self.log.info("=" * 60)
+        self.log.info("")
+        self.log.info("The VM has been fully migrated to Proxmox.")
         if not isinstance(self.os_handler, OtherHandler):
-            logger.info("  - VirtIO drivers installed")
-            logger.info("  - VMware Tools removed")
-            logger.info("  - Network configuration restored")
-        logger.info("  - All NICs enabled")
+            self.log.info("  - VirtIO drivers installed")
+            self.log.info("  - VMware Tools removed")
+            self.log.info("  - Network configuration restored")
+        self.log.info("  - All NICs enabled")

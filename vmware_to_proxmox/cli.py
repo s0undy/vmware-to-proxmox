@@ -2,8 +2,11 @@
 
 import argparse
 import logging
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import yaml
 
 from .config import AppConfig, load_config
 from .exceptions import ConfigurationError, MigrationError
@@ -164,7 +167,7 @@ def _run_sequential(orchestrators: list[MigrationOrchestrator]) -> tuple[list[st
         try:
             result = orch.run()
             results.append(result)
-        except MigrationError as exc:
+        except Exception as exc:
             logger.error("")
             logger.error("MIGRATION FAILED [%s]: %s", orch.config.migration.vm_name, exc)
             logger.error(
@@ -187,7 +190,7 @@ def _run_parallel(orchestrators: list[MigrationOrchestrator]) -> tuple[list[str]
             try:
                 result = future.result()
                 results.append(result)
-            except MigrationError as exc:
+            except Exception as exc:
                 logger.error("")
                 logger.error("MIGRATION FAILED [%s]: %s", vm_name, exc)
                 logger.error(
@@ -221,7 +224,6 @@ def main():
     args = parser.parse_args()
 
     # Resolve verbose from CLI > YAML (need to peek at YAML before full load)
-    import os, yaml
     yaml_data = {}
     if os.path.exists(args.config):
         with open(args.config) as f:

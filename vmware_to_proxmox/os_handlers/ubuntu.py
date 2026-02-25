@@ -3,7 +3,7 @@
 import base64
 import logging
 
-from .base import OSHandler
+from .base import OSHandler, StepContext
 from ..exceptions import GuestOperationError, ProxmoxOperationError
 
 logger = logging.getLogger(__name__)
@@ -22,11 +22,11 @@ class UbuntuHandler(OSHandler):
     def step_3_export_nic_config(self, vm, guest_ops, config, dry_run):
         # Netplan configs already live on disk — no export needed.
         # Step 13 will replace interface names in the existing netplan files.
-        logger.info("  Skipped (netplan config already on disk, will update interface names in step 13).")
+        logger.info("  Skipped — netplan config already on disk, will update interface names in step 13.")
 
     def step_4_enable_boot_driver(self, vm, guest_ops, config, dry_run):
         # VirtIO SCSI is included in the default Ubuntu initramfs — nothing to do.
-        logger.info("  Skipped (VirtIO SCSI is built into the Ubuntu kernel/initramfs by default).")
+        logger.info("  Skipped — VirtIO SCSI is built into the Ubuntu kernel/initramfs.")
 
     def step_5_install_virtio_tools(self, vm, guest_ops, config, dry_run):
         guest_ops.wait_for_tools(vm)
@@ -51,27 +51,20 @@ class UbuntuHandler(OSHandler):
     # Steps 11-13: run via QEMU guest agent after VM is on Proxmox
     # ------------------------------------------------------------------
 
-    def step_11_install_virtio_drivers(self, vmid, px, config, dry_run,
-                                       wait_for_vm_ready, effective_wait, sleep_fn):
+    def step_11_install_virtio_drivers(self, ctx: StepContext):
         # VirtIO drivers are built into the Linux kernel — nothing to install.
-        logger.info("  Skipped (VirtIO drivers are built into the Linux kernel).")
+        ctx.log.info("  Skipped — VirtIO drivers are built into the Linux kernel.")
 
-    def step_12_purge_vmware_tools(self, vmid, px, config, dry_run,
-                                   wait_for_vm_ready, effective_wait, sleep_fn):
+    def step_12_purge_vmware_tools(self, ctx: StepContext):
         from ..migration import PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS
 
-        if dry_run:
-            logger.info("  DRY RUN: would remove open-vm-tools")
+        if ctx.dry_run:
+            ctx.log.info("  DRY RUN: would remove open-vm-tools")
             return
 
-        settle = 10 if config.migration.enable_nics_on_boot else 30
-        wait_for_vm_ready(vmid, settle_seconds=settle)
+        self._wait_and_connect_agent(ctx)
 
-        logger.info("  Waiting for QEMU guest agent ...")
-        px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
-
-        logger.info("  Removing open-vm-tools ...")
+        ctx.log.info("  Removing open-vm-tools ...")
         cmd = (
             "apt remove open-vm-tools -y; "
             "rm -rf /etc/vmware-tools; "
@@ -80,8 +73,8 @@ class UbuntuHandler(OSHandler):
             "rm -rf /etc/systemd/system/open-vm-tools.service.requires; "
             "apt autoremove -y"
         )
-        result = px.guest_exec(
-            vmid,
+        result = ctx.px.guest_exec(
+            ctx.vmid,
             command="/bin/bash",
             arguments=["-c", cmd],
             timeout=300,
@@ -91,33 +84,23 @@ class UbuntuHandler(OSHandler):
                 f"open-vm-tools removal failed with exit code {result['exitcode']}: "
                 f"{result.get('err-data', '')}"
             )
-        logger.info("  open-vm-tools purged.")
+        ctx.log.info("  open-vm-tools purged.")
 
-        logger.info("  Waiting %ds before reboot ...", effective_wait(PRE_REBOOT_PAUSE_SECONDS))
-        sleep_fn(PRE_REBOOT_PAUSE_SECONDS)
-        px.reboot_vm(vmid)
-        logger.info("  Waiting %ds for VM to start cleanly ...", effective_wait(POST_REBOOT_BOOT_SECONDS))
-        sleep_fn(POST_REBOOT_BOOT_SECONDS)
+        self._reboot_and_wait(ctx, PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS)
 
-    def step_13_restore_nic_config(self, vmid, px, config, dry_run,
-                                   wait_for_vm_ready, effective_wait, sleep_fn):
+    def step_13_restore_nic_config(self, ctx: StepContext):
         from ..migration import NIC_RESTORE_PRE_REBOOT_SECONDS, POST_REBOOT_BOOT_SECONDS
 
-        if dry_run:
-            logger.info("  DRY RUN: would update netplan interface names")
+        if ctx.dry_run:
+            ctx.log.info("  DRY RUN: would update netplan interface names")
             return
 
-        settle = 10 if config.migration.enable_nics_on_boot else 30
-        wait_for_vm_ready(vmid, settle_seconds=settle)
-
-        logger.info("  Waiting for QEMU guest agent ...")
-        px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
+        self._wait_and_connect_agent(ctx)
 
         # Replace old VMware interface names with new VirtIO names in netplan.
         # The script is base64-encoded to preserve newlines/indentation
         # through the QEMU guest agent API transport.
-        logger.info("  Updating netplan interface names ...")
+        ctx.log.info("  Updating netplan interface names ...")
         script = """\
 import json, subprocess, glob, yaml
 
@@ -166,8 +149,8 @@ for f in files:
 print('changed' if changed else 'unchanged')
 """
         b64_script = base64.b64encode(script.encode()).decode()
-        result = px.guest_exec(
-            vmid,
+        result = ctx.px.guest_exec(
+            ctx.vmid,
             command="/bin/bash",
             arguments=["-c", f"echo {b64_script} | base64 -d | python3"],
             timeout=120,
@@ -179,13 +162,13 @@ print('changed' if changed else 'unchanged')
             )
         output = result.get("out-data", "").strip()
         if "changed" in output:
-            logger.info("  Netplan interface names updated.")
+            ctx.log.info("  Netplan interface names updated.")
         else:
-            logger.info("  Netplan interface names already correct.")
+            ctx.log.info("  Netplan interface names already correct.")
 
         # Apply netplan changes
-        result = px.guest_exec(
-            vmid,
+        result = ctx.px.guest_exec(
+            ctx.vmid,
             command="/bin/bash",
             arguments=["-c", "netplan apply"],
             timeout=60,
@@ -195,10 +178,6 @@ print('changed' if changed else 'unchanged')
                 f"netplan apply failed with exit code {result['exitcode']}: "
                 f"{result.get('err-data', '')}"
             )
-        logger.info("  Netplan applied.")
+        ctx.log.info("  Netplan applied.")
 
-        logger.info("  Waiting %ds before reboot ...", effective_wait(NIC_RESTORE_PRE_REBOOT_SECONDS))
-        sleep_fn(NIC_RESTORE_PRE_REBOOT_SECONDS)
-        px.reboot_vm(vmid)
-        logger.info("  Waiting %ds for VM to start cleanly ...", effective_wait(POST_REBOOT_BOOT_SECONDS))
-        sleep_fn(POST_REBOOT_BOOT_SECONDS)
+        self._reboot_and_wait(ctx, NIC_RESTORE_PRE_REBOOT_SECONDS, POST_REBOOT_BOOT_SECONDS)
