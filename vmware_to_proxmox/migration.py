@@ -94,7 +94,7 @@ class MigrationOrchestrator:
             (11, "Install VirtIO drivers from ISO", self._step_11_install_virtio_drivers),
             (12, "Purge VMware Tools", self._step_12_purge_vmware_tools),
             (13, "Restore NIC configuration", self._step_13_import_nic_config),
-            (14, "Enable NICs and final reboot", self._step_14_enable_nics),
+            (14, "Finalize VM", self._step_14_finalize),
         ]
 
         for num, label, fn in steps:
@@ -351,15 +351,18 @@ class MigrationOrchestrator:
             vmid, self.px, self.config, self.dry_run,
             self._wait_for_vm_ready, self._effective_wait, self._sleep)
 
-    def _step_14_enable_nics(self, vm):
+    def _step_14_finalize(self, vm):
         vmid = self._resolve_vmid()
 
         if self.dry_run:
-            logger.info("  DRY RUN: would unmount ISO, enable all NICs, and reboot VMID %d", vmid)
+            logger.info("  DRY RUN: would unmount ISO, clean up unused disks, enable NICs, and reboot VMID %d", vmid)
             return
 
         # Unmount the VirtIO ISO
         self.px.unmount_iso(vmid)
+
+        # Delete any unused (detached) disks left over from the migration
+        self.px.delete_unused_disks(vmid)
 
         # Enable all NICs (only needed if they were created with link_down=1)
         if not self.config.migration.enable_nics_on_boot:
@@ -372,13 +375,17 @@ class MigrationOrchestrator:
         else:
             logger.info("  NICs already enabled (enable_nics_on_boot=true), skipping.")
 
-        # Final reboot
-        self.px.reboot_vm(vmid)
-        logger.info("  Final reboot initiated. Waiting 20s for VM to boot cleanly ...")
-        time.sleep(20)
-        os_label = self.os_handler.os_label if self.os_handler else "OS"
-        logger.info("  Waiting 10s for %s to start up ...", os_label)
-        time.sleep(10)
+        # Final reboot — skip if NICs were already enabled on boot,
+        # because step 13 (NIC restore) already performed a reboot.
+        if self.config.migration.enable_nics_on_boot:
+            logger.info("  Skipping final reboot (already rebooted in step 13).")
+        else:
+            self.px.reboot_vm(vmid)
+            logger.info("  Final reboot initiated. Waiting 20s for VM to boot cleanly ...")
+            time.sleep(20)
+            os_label = self.os_handler.os_label if self.os_handler else "OS"
+            logger.info("  Waiting 10s for %s to start up ...", os_label)
+            time.sleep(10)
 
     # ------------------------------------------------------------------
     # Helpers

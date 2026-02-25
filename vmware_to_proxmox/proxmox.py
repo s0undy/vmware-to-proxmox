@@ -375,6 +375,26 @@ class ProxmoxClient:
         node = self.config.node
         return self.api.nodes(node).qemu(vmid).config.get()
 
+    def delete_unused_disks(self, vmid: int) -> None:
+        """Delete all unused (detached) disks from a Proxmox VM."""
+        node = self.config.node
+        config = self.get_vm_config_proxmox(vmid)
+        unused_keys = sorted(
+            k for k in config if k.startswith("unused") and k[6:].isdigit()
+        )
+        if not unused_keys:
+            logger.info("  No unused disks found.")
+            return
+
+        logger.info("  Found %d unused disk(s): %s", len(unused_keys), ", ".join(unused_keys))
+        try:
+            self.api.nodes(node).qemu(vmid).config.put(delete=",".join(unused_keys))
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to delete unused disks on VM {vmid}: {exc}"
+            ) from exc
+        logger.info("  Unused disks deleted.")
+
     def get_vm_status(self, vmid: int) -> str:
         """Return the current power status of a Proxmox VM (e.g. 'running')."""
         node = self.config.node
