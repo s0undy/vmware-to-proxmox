@@ -2,7 +2,7 @@
 
 import logging
 
-from .base import OSHandler
+from .base import OSHandler, StepContext
 from ..exceptions import GuestOperationError, ProxmoxOperationError
 
 logger = logging.getLogger(__name__)
@@ -69,35 +69,29 @@ class WindowsHandler(OSHandler):
             )
         logger.info("  VirtIO guest tools installed.")
 
-    def step_11_install_virtio_drivers(self, vmid, px, config, dry_run,
-                                       wait_for_vm_ready, effective_wait, sleep_fn):
+    def step_11_install_virtio_drivers(self, ctx: StepContext):
         from ..migration import ISO_MOUNT_WAIT_SECONDS, VIRTIO_INSTALL_SETTLE_SECONDS
 
-        iso_storage = config.migration.virtio_iso_storage
-        iso_filename = config.migration.virtio_iso_filename
+        iso_storage = ctx.config.migration.virtio_iso_storage
+        iso_filename = ctx.config.migration.virtio_iso_filename
 
-        if dry_run:
-            logger.info("  DRY RUN: would mount %s:iso/%s on VMID %d and install VirtIO drivers",
-                        iso_storage, iso_filename, vmid)
+        if ctx.dry_run:
+            ctx.log.info("  DRY RUN: would mount %s:iso/%s on VMID %d and install VirtIO drivers",
+                         iso_storage, iso_filename, ctx.vmid)
             return
 
-        settle = 10 if config.migration.enable_nics_on_boot else 30
-        wait_for_vm_ready(vmid, settle_seconds=settle)
+        self._wait_and_connect_agent(ctx)
 
         # Mount the VirtIO ISO
-        px.mount_iso(vmid, iso_storage, iso_filename)
-        logger.info("  Waiting %ds for ISO to become available ...", effective_wait(ISO_MOUNT_WAIT_SECONDS))
-        sleep_fn(ISO_MOUNT_WAIT_SECONDS)
-
-        # Wait for guest agent
-        logger.info("  Waiting for QEMU guest agent ...")
-        px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
+        ctx.px.mount_iso(ctx.vmid, iso_storage, iso_filename)
+        ctx.log.info("  Waiting %ds for ISO to become available ...",
+                     ctx.effective_wait(ISO_MOUNT_WAIT_SECONDS))
+        ctx.sleep_fn(ISO_MOUNT_WAIT_SECONDS)
 
         # Discover the drive letter of the mounted ISO
-        logger.info("  Discovering ISO drive letter ...")
-        result = px.guest_exec(
-            vmid,
+        ctx.log.info("  Discovering ISO drive letter ...")
+        result = ctx.px.guest_exec(
+            ctx.vmid,
             command="powershell",
             arguments=["-Command",
                        "(Get-Volume | Where-Object {$_.FileSystemLabel -like 'virtio-win*'}).DriveLetter"],
@@ -113,13 +107,13 @@ class WindowsHandler(OSHandler):
             raise ProxmoxOperationError(
                 f"Unexpected drive letter result: '{drive_letter}'"
             )
-        logger.info("  VirtIO ISO mounted on drive %s:", drive_letter)
+        ctx.log.info("  VirtIO ISO mounted on drive %s:", drive_letter)
 
         # Install the full VirtIO driver package via msiexec
         msi_path = f"{drive_letter}:\\virtio-win-gt-x64.msi"
-        logger.info("  Installing VirtIO drivers from %s ...", msi_path)
-        result = px.guest_exec(
-            vmid,
+        ctx.log.info("  Installing VirtIO drivers from %s ...", msi_path)
+        result = ctx.px.guest_exec(
+            ctx.vmid,
             command="msiexec",
             arguments=["/i", msi_path, "/quiet", "/qn", "/norestart"],
             timeout=600,
@@ -129,31 +123,26 @@ class WindowsHandler(OSHandler):
                 f"msiexec failed with exit code {result['exitcode']}: "
                 f"{result.get('err-data', '')}"
             )
-        logger.info("  VirtIO driver package installed.")
+        ctx.log.info("  VirtIO driver package installed.")
 
-        logger.info("  Waiting %ds for VM to settle ...", effective_wait(VIRTIO_INSTALL_SETTLE_SECONDS))
-        sleep_fn(VIRTIO_INSTALL_SETTLE_SECONDS)
+        ctx.log.info("  Waiting %ds for VM to settle ...",
+                     ctx.effective_wait(VIRTIO_INSTALL_SETTLE_SECONDS))
+        ctx.sleep_fn(VIRTIO_INSTALL_SETTLE_SECONDS)
 
-    def step_12_purge_vmware_tools(self, vmid, px, config, dry_run,
-                                   wait_for_vm_ready, effective_wait, sleep_fn):
+    def step_12_purge_vmware_tools(self, ctx: StepContext):
         from ..migration import PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS
 
-        script = config.migration.purge_vmware_script
+        script = ctx.config.migration.purge_vmware_script
 
-        if dry_run:
-            logger.info("  DRY RUN: would run %s -Force on VMID %d", script, vmid)
+        if ctx.dry_run:
+            ctx.log.info("  DRY RUN: would run %s -Force on VMID %d", script, ctx.vmid)
             return
 
-        settle = 10 if config.migration.enable_nics_on_boot else 30
-        wait_for_vm_ready(vmid, settle_seconds=settle)
+        self._wait_and_connect_agent(ctx)
 
-        logger.info("  Waiting for QEMU guest agent ...")
-        px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
-
-        logger.info("  Running purge-vmware-tools.ps1 -Force ...")
-        result = px.guest_exec(
-            vmid,
+        ctx.log.info("  Running purge-vmware-tools.ps1 -Force ...")
+        result = ctx.px.guest_exec(
+            ctx.vmid,
             command="powershell",
             arguments=["-ExecutionPolicy", "Bypass", "-File", script, "-Force"],
             timeout=600,
@@ -163,34 +152,24 @@ class WindowsHandler(OSHandler):
                 f"purge-vmware-tools.ps1 failed with exit code {result['exitcode']}: "
                 f"{result.get('err-data', '')}"
             )
-        logger.info("  VMware Tools purged.")
+        ctx.log.info("  VMware Tools purged.")
 
-        logger.info("  Waiting %ds before reboot ...", effective_wait(PRE_REBOOT_PAUSE_SECONDS))
-        sleep_fn(PRE_REBOOT_PAUSE_SECONDS)
-        px.reboot_vm(vmid)
-        logger.info("  Waiting %ds for VM to start cleanly ...", effective_wait(POST_REBOOT_BOOT_SECONDS))
-        sleep_fn(POST_REBOOT_BOOT_SECONDS)
+        self._reboot_and_wait(ctx, PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS)
 
-    def step_13_restore_nic_config(self, vmid, px, config, dry_run,
-                                   wait_for_vm_ready, effective_wait, sleep_fn):
+    def step_13_restore_nic_config(self, ctx: StepContext):
         from ..migration import NIC_RESTORE_PRE_REBOOT_SECONDS, POST_REBOOT_BOOT_SECONDS
 
-        script = config.migration.import_nic_script
+        script = ctx.config.migration.import_nic_script
 
-        if dry_run:
-            logger.info("  DRY RUN: would run %s on VMID %d", script, vmid)
+        if ctx.dry_run:
+            ctx.log.info("  DRY RUN: would run %s on VMID %d", script, ctx.vmid)
             return
 
-        settle = 10 if config.migration.enable_nics_on_boot else 30
-        wait_for_vm_ready(vmid, settle_seconds=settle)
+        self._wait_and_connect_agent(ctx)
 
-        logger.info("  Waiting for QEMU guest agent ...")
-        px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
-
-        logger.info("  Running importNicConfig.ps1 ...")
-        result = px.guest_exec(
-            vmid,
+        ctx.log.info("  Running importNicConfig.ps1 ...")
+        result = ctx.px.guest_exec(
+            ctx.vmid,
             command="powershell",
             arguments=["-ExecutionPolicy", "Bypass", "-File", script],
             timeout=600,
@@ -200,10 +179,6 @@ class WindowsHandler(OSHandler):
                 f"importNicConfig.ps1 failed with exit code {result['exitcode']}: "
                 f"{result.get('err-data', '')}"
             )
-        logger.info("  NIC configuration restored.")
+        ctx.log.info("  NIC configuration restored.")
 
-        logger.info("  Waiting %ds before reboot ...", effective_wait(NIC_RESTORE_PRE_REBOOT_SECONDS))
-        sleep_fn(NIC_RESTORE_PRE_REBOOT_SECONDS)
-        px.reboot_vm(vmid)
-        logger.info("  Waiting %ds for VM to start cleanly ...", effective_wait(POST_REBOOT_BOOT_SECONDS))
-        sleep_fn(POST_REBOOT_BOOT_SECONDS)
+        self._reboot_and_wait(ctx, NIC_RESTORE_PRE_REBOOT_SECONDS, POST_REBOOT_BOOT_SECONDS)
