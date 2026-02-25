@@ -36,7 +36,8 @@ class UbuntuHandler(OSHandler):
             return
 
         cmd = (
-            "sudo apt -y install qemu-guest-agent && "
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get update -q && "
+            "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent && "
             "sudo systemctl enable --now qemu-guest-agent && "
             "sudo systemctl restart qemu-guest-agent"
         )
