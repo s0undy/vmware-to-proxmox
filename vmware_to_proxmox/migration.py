@@ -76,6 +76,13 @@ class MigrationOrchestrator:
             self.log.info("  Resuming from step %d", self.skip_to)
         self.log.info("=" * 60)
 
+        # Validate skip-to prerequisites early
+        if self.skip_to > 2 and not self.config.migration.proxmox_vmid:
+            raise MigrationError(
+                f"--skip-to {self.skip_to} requires --proxmox-vmid (or proxmox_vmid in config) "
+                "because step 2 (Create Proxmox VM) is skipped."
+            )
+
         self._connect()
 
         vm = self.vc.get_vm_by_name(vm_name)
