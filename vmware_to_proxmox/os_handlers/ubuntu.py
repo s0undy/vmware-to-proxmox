@@ -37,9 +37,7 @@ class UbuntuHandler(OSHandler):
 
         cmd = (
             "DEBIAN_FRONTEND=noninteractive apt-get update -q && "
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent && "
-            "systemctl enable --now qemu-guest-agent && "
-            "systemctl restart qemu-guest-agent"
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent"
         )
         exit_code = guest_ops.run_sudo_bash(vm, cmd, timeout_seconds=300)
         if exit_code != 0:
