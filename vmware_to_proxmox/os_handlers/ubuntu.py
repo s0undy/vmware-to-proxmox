@@ -126,8 +126,26 @@ links = json.loads(result.stdout)
 new_ifaces = [l['ifname'] for l in sorted(links, key=lambda x: x['ifindex'])
               if l['ifname'] != 'lo']
 
-changed = False
 files = sorted(glob.glob('/etc/netplan/*.yaml') + glob.glob('/etc/netplan/*.yml'))
+
+# First pass: collect ALL old interface names across all netplan files
+all_old_ifaces = []
+for f in files:
+    with open(f) as fh:
+        data = yaml.safe_load(fh)
+    eths = (data or {}).get('network', {}).get('ethernets', {})
+    for name in sorted(eths.keys()):
+        if name not in all_old_ifaces:
+            all_old_ifaces.append(name)
+all_old_ifaces.sort()
+
+# Build global mapping: old interface name -> new interface name
+iface_map = {}
+for i, old_name in enumerate(all_old_ifaces):
+    iface_map[old_name] = new_ifaces[i] if i < len(new_ifaces) else old_name
+
+# Second pass: apply mapping to each file
+changed = False
 for f in files:
     with open(f) as fh:
         data = yaml.safe_load(fh)
@@ -136,10 +154,9 @@ for f in files:
     eths = data.get('network', {}).get('ethernets', {})
     if not eths:
         continue
-    old_ifaces = sorted(eths.keys())
     new_eths = {}
-    for i, old_name in enumerate(old_ifaces):
-        new_name = new_ifaces[i] if i < len(new_ifaces) else old_name
+    for old_name in sorted(eths.keys()):
+        new_name = iface_map.get(old_name, old_name)
         new_eths[new_name] = eths[old_name]
         if new_name != old_name:
             changed = True
