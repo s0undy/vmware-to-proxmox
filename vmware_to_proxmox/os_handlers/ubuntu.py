@@ -1,5 +1,6 @@
 """Ubuntu OS handler — Linux-specific migration steps."""
 
+import base64
 import logging
 
 from .base import OSHandler
@@ -113,41 +114,45 @@ class UbuntuHandler(OSHandler):
         px.wait_for_guest_agent(vmid)
         logger.info("  Guest agent is responding.")
 
-        # Replace old VMware interface names with new VirtIO names in netplan
+        # Replace old VMware interface names with new VirtIO names in netplan.
+        # The script is base64-encoded to preserve newlines/indentation
+        # through the QEMU guest agent API transport.
         logger.info("  Updating netplan interface names ...")
-        script = (
-            "import json, subprocess, glob, re, yaml; "
-            "result = subprocess.run(['ip', '-j', 'link', 'show'], capture_output=True, text=True); "
-            "links = json.loads(result.stdout); "
-            "new_ifaces = [l['ifname'] for l in sorted(links, key=lambda x: x['ifindex']) "
-            "if l['ifname'] != 'lo']; "
-            "changed = False; "
-            "files = sorted(glob.glob('/etc/netplan/*.yaml')); "
-            "[files.extend(glob.glob('/etc/netplan/*.yml'))]; "
-            "for f in files:\n"
-            "    with open(f) as fh:\n"
-            "        data = yaml.safe_load(fh)\n"
-            "    if not data or 'network' not in data:\n"
-            "        continue\n"
-            "    eths = data.get('network', {}).get('ethernets', {})\n"
-            "    if not eths:\n"
-            "        continue\n"
-            "    old_ifaces = sorted(eths.keys())\n"
-            "    new_eths = {}\n"
-            "    for i, old_name in enumerate(old_ifaces):\n"
-            "        new_name = new_ifaces[i] if i < len(new_ifaces) else old_name\n"
-            "        new_eths[new_name] = eths[old_name]\n"
-            "        if new_name != old_name:\n"
-            "            changed = True\n"
-            "    data['network']['ethernets'] = new_eths\n"
-            "    with open(f, 'w') as fh:\n"
-            "        yaml.dump(data, fh, default_flow_style=False)\n"
-            "print('changed' if changed else 'unchanged')"
-        )
+        script = """\
+import json, subprocess, glob, yaml
+
+result = subprocess.run(['ip', '-j', 'link', 'show'], capture_output=True, text=True)
+links = json.loads(result.stdout)
+new_ifaces = [l['ifname'] for l in sorted(links, key=lambda x: x['ifindex'])
+              if l['ifname'] != 'lo']
+
+changed = False
+files = sorted(glob.glob('/etc/netplan/*.yaml') + glob.glob('/etc/netplan/*.yml'))
+for f in files:
+    with open(f) as fh:
+        data = yaml.safe_load(fh)
+    if not data or 'network' not in data:
+        continue
+    eths = data.get('network', {}).get('ethernets', {})
+    if not eths:
+        continue
+    old_ifaces = sorted(eths.keys())
+    new_eths = {}
+    for i, old_name in enumerate(old_ifaces):
+        new_name = new_ifaces[i] if i < len(new_ifaces) else old_name
+        new_eths[new_name] = eths[old_name]
+        if new_name != old_name:
+            changed = True
+    data['network']['ethernets'] = new_eths
+    with open(f, 'w') as fh:
+        yaml.dump(data, fh, default_flow_style=False)
+print('changed' if changed else 'unchanged')
+"""
+        b64_script = base64.b64encode(script.encode()).decode()
         result = px.guest_exec(
             vmid,
-            command="python3",
-            arguments=["-c", script],
+            command="/bin/bash",
+            arguments=["-c", f"echo {b64_script} | base64 -d | python3"],
             timeout=120,
         )
         if result["exitcode"] != 0:
