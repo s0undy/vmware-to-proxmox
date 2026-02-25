@@ -1,11 +1,13 @@
-"""Migration orchestrator — ties all ten steps together."""
+"""Migration orchestrator — ties all fourteen steps together."""
 
 import logging
 import time
 
 from .config import AppConfig
-from .exceptions import GuestOperationError, MigrationError, ProxmoxOperationError
+from .exceptions import MigrationError, ProxmoxOperationError
 from .guest_ops import GuestOperations
+from .os_handlers import detect_os_type, get_os_handler
+from .os_handlers.base import OSHandler
 from .proxmox import ProxmoxClient
 from .vcenter import VCenterClient
 
@@ -27,10 +29,12 @@ VM_READY_POLL_SECONDS = 5          # Poll interval for VM ready check
 
 
 class MigrationOrchestrator:
-    def __init__(self, config: AppConfig, skip_to: int = 1, dry_run: bool = False):
+    def __init__(self, config: AppConfig, skip_to: int = 1, dry_run: bool = False,
+                 os_handler: OSHandler | None = None):
         self.config = config
         self.skip_to = skip_to
         self.dry_run = dry_run
+        self.os_handler = os_handler
         self.vc = VCenterClient(config.vcenter)
         self.px = ProxmoxClient(config.proxmox)
         self.guest_ops = None
@@ -67,6 +71,14 @@ class MigrationOrchestrator:
 
         vm = self.vc.get_vm_by_name(vm_name)
         logger.info("Found VM: %s  (power: %s)", vm.name, vm.runtime.powerState)
+
+        # Auto-detect OS type from vCenter guestId if not set explicitly
+        if self.os_handler is None:
+            guest_id = vm.config.guestId
+            detected = detect_os_type(guest_id)
+            logger.info("  Auto-detected OS type: %s  (guestId: %s)", detected, guest_id)
+            self.os_handler = get_os_handler(detected)
+        logger.info("  OS handler:          %s", self.os_handler.os_label)
 
         steps = [
             (1, "Storage vMotion", self._step_1_storage_vmotion),
@@ -137,7 +149,9 @@ class MigrationOrchestrator:
         self.px.connect()
         logger.info("  Connected.")
 
-        self.guest_ops = GuestOperations(self.vc, self.config.guest)
+        # Guest operations require credentials — skip when none provided (e.g. os_type=other)
+        if self.config.guest.user and self.config.guest.password:
+            self.guest_ops = GuestOperations(self.vc, self.config.guest)
 
     # ------------------------------------------------------------------
     # Step implementations
@@ -184,59 +198,16 @@ class MigrationOrchestrator:
         logger.info("  Proxmox VM created — VMID %d", vmid)
 
     def _step_3_export_nic_config(self, vm):
-        self.guest_ops.wait_for_tools(vm)
-        logger.info("  VMware Tools is running.")
-
-        script = self.config.migration.export_nic_script
-        if self.dry_run:
-            logger.info("  DRY RUN: would run %s", script)
-            return
-
-        exit_code = self.guest_ops.run_powershell(vm, script)
-        if exit_code != 0:
-            raise GuestOperationError(
-                f"exportNicConfig.ps1 exited with code {exit_code}"
-            )
-        logger.info("  NIC config exported to network.json inside guest.")
+        self.os_handler.step_3_export_nic_config(
+            vm, self.guest_ops, self.config, self.dry_run)
 
     def _step_4_enable_vioscsi(self, vm):
-        self.guest_ops.wait_for_tools(vm)
-        logger.info("  VMware Tools is running.")
-
-        script = self.config.migration.vioscsi_script
-        driver_path = self.config.migration.virtio_driver_path
-        args = f'-DriverPath "{driver_path}"'
-
-        if self.dry_run:
-            logger.info("  DRY RUN: would run %s %s", script, args)
-            return
-
-        exit_code = self.guest_ops.run_powershell(vm, script, arguments=args,
-                                                  timeout_seconds=900)
-        if exit_code != 0:
-            raise GuestOperationError(
-                f"enable-vioscsi-to-load-on-boot.ps1 exited with code {exit_code}"
-            )
-        logger.info("  VirtIO SCSI driver configured for boot loading.")
+        self.os_handler.step_4_enable_boot_driver(
+            vm, self.guest_ops, self.config, self.dry_run)
 
     def _step_5_install_virtio_tools(self, vm):
-        self.guest_ops.wait_for_tools(vm)
-        logger.info("  VMware Tools is running.")
-
-        exe = self.config.migration.virtio_tools_path
-        args = "/install /quiet /norestart"
-
-        if self.dry_run:
-            logger.info("  DRY RUN: would run %s %s", exe, args)
-            return
-
-        exit_code = self.guest_ops.run_executable(vm, exe, arguments=args,
-                                                  timeout_seconds=600)
-        if exit_code != 0:
-            raise GuestOperationError(
-                f"virtio-win-guest-tools.exe exited with code {exit_code}"
-            )
-        logger.info("  VirtIO guest tools installed.")
+        self.os_handler.step_5_install_virtio_tools(
+            vm, self.guest_ops, self.config, self.dry_run)
 
     def _step_6_shutdown(self, vm):
         if self.dry_run:
@@ -364,139 +335,21 @@ class MigrationOrchestrator:
 
     def _step_11_install_virtio_drivers(self, vm):
         vmid = self._resolve_vmid()
-        iso_storage = self.config.migration.virtio_iso_storage
-        iso_filename = self.config.migration.virtio_iso_filename
-
-        if self.dry_run:
-            logger.info("  DRY RUN: would mount %s:iso/%s on VMID %d and install VirtIO drivers",
-                        iso_storage, iso_filename, vmid)
-            return
-
-        # Wait for the VM to be running and Windows to start up
-        settle = 10 if self.config.migration.enable_nics_on_boot else 30
-        self._wait_for_vm_ready(vmid, settle_seconds=settle)
-
-        # Mount the VirtIO ISO
-        self.px.mount_iso(vmid, iso_storage, iso_filename)
-        logger.info("  Waiting %ds for ISO to become available ...", self._effective_wait(ISO_MOUNT_WAIT_SECONDS))
-        self._sleep(ISO_MOUNT_WAIT_SECONDS)
-
-        # Wait for guest agent
-        logger.info("  Waiting for QEMU guest agent ...")
-        self.px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
-
-        # Discover the drive letter of the mounted ISO
-        logger.info("  Discovering ISO drive letter ...")
-        result = self.px.guest_exec(
-            vmid,
-            command="powershell",
-            arguments=["-Command",
-                       "(Get-Volume | Where-Object {$_.FileSystemLabel -like 'virtio-win*'}).DriveLetter"],
-            timeout=60,
-        )
-        if result["exitcode"] != 0:
-            raise ProxmoxOperationError(
-                f"Failed to discover ISO drive letter: exit code {result['exitcode']}, "
-                f"stderr: {result.get('err-data', '')}"
-            )
-        drive_letter = result.get("out-data", "").strip()
-        if not drive_letter or len(drive_letter) != 1:
-            raise ProxmoxOperationError(
-                f"Unexpected drive letter result: '{drive_letter}'"
-            )
-        logger.info("  VirtIO ISO mounted on drive %s:", drive_letter)
-
-        # Install the full VirtIO driver package via msiexec
-        msi_path = f"{drive_letter}:\\virtio-win-gt-x64.msi"
-        logger.info("  Installing VirtIO drivers from %s ...", msi_path)
-        result = self.px.guest_exec(
-            vmid,
-            command="msiexec",
-            arguments=["/i", msi_path, "/quiet", "/qn", "/norestart"],
-            timeout=600,
-        )
-        if result["exitcode"] != 0:
-            raise ProxmoxOperationError(
-                f"msiexec failed with exit code {result['exitcode']}: "
-                f"{result.get('err-data', '')}"
-            )
-        logger.info("  VirtIO driver package installed.")
-
-        logger.info("  Waiting %ds for VM to settle ...", self._effective_wait(VIRTIO_INSTALL_SETTLE_SECONDS))
-        self._sleep(VIRTIO_INSTALL_SETTLE_SECONDS)
+        self.os_handler.step_11_install_virtio_drivers(
+            vmid, self.px, self.config, self.dry_run,
+            self._wait_for_vm_ready, self._effective_wait, self._sleep)
 
     def _step_12_purge_vmware_tools(self, vm):
         vmid = self._resolve_vmid()
-        script = self.config.migration.purge_vmware_script
-
-        if self.dry_run:
-            logger.info("  DRY RUN: would run %s -Force on VMID %d", script, vmid)
-            return
-
-        # Wait for the VM to be running and Windows to start up
-        settle = 10 if self.config.migration.enable_nics_on_boot else 30
-        self._wait_for_vm_ready(vmid, settle_seconds=settle)
-
-        logger.info("  Waiting for QEMU guest agent ...")
-        self.px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
-
-        logger.info("  Running purge-vmware-tools.ps1 -Force ...")
-        result = self.px.guest_exec(
-            vmid,
-            command="powershell",
-            arguments=["-ExecutionPolicy", "Bypass", "-File", script, "-Force"],
-            timeout=600,
-        )
-        if result["exitcode"] != 0:
-            raise ProxmoxOperationError(
-                f"purge-vmware-tools.ps1 failed with exit code {result['exitcode']}: "
-                f"{result.get('err-data', '')}"
-            )
-        logger.info("  VMware Tools purged.")
-
-        logger.info("  Waiting %ds before reboot ...", self._effective_wait(PRE_REBOOT_PAUSE_SECONDS))
-        self._sleep(PRE_REBOOT_PAUSE_SECONDS)
-        self.px.reboot_vm(vmid)
-        logger.info("  Waiting %ds for VM to start cleanly ...", self._effective_wait(POST_REBOOT_BOOT_SECONDS))
-        self._sleep(POST_REBOOT_BOOT_SECONDS)
+        self.os_handler.step_12_purge_vmware_tools(
+            vmid, self.px, self.config, self.dry_run,
+            self._wait_for_vm_ready, self._effective_wait, self._sleep)
 
     def _step_13_import_nic_config(self, vm):
         vmid = self._resolve_vmid()
-        script = self.config.migration.import_nic_script
-
-        if self.dry_run:
-            logger.info("  DRY RUN: would run %s on VMID %d", script, vmid)
-            return
-
-        # Wait for the VM to be running and Windows to start up
-        settle = 10 if self.config.migration.enable_nics_on_boot else 30
-        self._wait_for_vm_ready(vmid, settle_seconds=settle)
-
-        logger.info("  Waiting for QEMU guest agent ...")
-        self.px.wait_for_guest_agent(vmid)
-        logger.info("  Guest agent is responding.")
-
-        logger.info("  Running importNicConfig.ps1 ...")
-        result = self.px.guest_exec(
-            vmid,
-            command="powershell",
-            arguments=["-ExecutionPolicy", "Bypass", "-File", script],
-            timeout=600,
-        )
-        if result["exitcode"] != 0:
-            raise ProxmoxOperationError(
-                f"importNicConfig.ps1 failed with exit code {result['exitcode']}: "
-                f"{result.get('err-data', '')}"
-            )
-        logger.info("  NIC configuration restored.")
-
-        logger.info("  Waiting %ds before reboot ...", self._effective_wait(NIC_RESTORE_PRE_REBOOT_SECONDS))
-        self._sleep(NIC_RESTORE_PRE_REBOOT_SECONDS)
-        self.px.reboot_vm(vmid)
-        logger.info("  Waiting %ds for VM to start cleanly ...", self._effective_wait(POST_REBOOT_BOOT_SECONDS))
-        self._sleep(POST_REBOOT_BOOT_SECONDS)
+        self.os_handler.step_13_restore_nic_config(
+            vmid, self.px, self.config, self.dry_run,
+            self._wait_for_vm_ready, self._effective_wait, self._sleep)
 
     def _step_14_enable_nics(self, vm):
         vmid = self._resolve_vmid()
@@ -523,7 +376,8 @@ class MigrationOrchestrator:
         self.px.reboot_vm(vmid)
         logger.info("  Final reboot initiated. Waiting 20s for VM to boot cleanly ...")
         time.sleep(20)
-        logger.info("  Waiting 10s for Windows to start up ...")
+        os_label = self.os_handler.os_label if self.os_handler else "OS"
+        logger.info("  Waiting 10s for %s to start up ...", os_label)
         time.sleep(10)
 
     # ------------------------------------------------------------------
@@ -552,7 +406,7 @@ class MigrationOrchestrator:
         return vmid
 
     def _wait_for_vm_ready(self, vmid: int, settle_seconds: int = 30) -> None:
-        """Wait until Proxmox reports the VM as running, then wait extra time for Windows to boot."""
+        """Wait until Proxmox reports the VM as running, then wait extra time for the OS to boot."""
         logger.info("  Waiting for VM %d to be running ...", vmid)
         start = time.monotonic()
         status = "unknown"
@@ -566,7 +420,8 @@ class MigrationOrchestrator:
                 f"VM {vmid} did not reach 'running' state within "
                 f"{VM_READY_TIMEOUT_SECONDS}s (current: {status})"
             )
-        logger.info("  VM %d is running. Waiting %ds for Windows to start up ...", vmid, settle_seconds)
+        os_label = self.os_handler.os_label if self.os_handler else "OS"
+        logger.info("  VM %d is running. Waiting %ds for %s to start up ...", vmid, settle_seconds, os_label)
         time.sleep(settle_seconds)
         logger.info("  Ready to proceed.")
 
@@ -582,13 +437,15 @@ class MigrationOrchestrator:
     # ------------------------------------------------------------------
 
     def _print_next_steps(self):
+        from .os_handlers.other import OtherHandler
         logger.info("")
         logger.info("=" * 60)
         logger.info("MIGRATION COMPLETE")
         logger.info("=" * 60)
         logger.info("")
         logger.info("The VM has been fully migrated to Proxmox.")
-        logger.info("  - VirtIO drivers installed")
-        logger.info("  - VMware Tools removed")
-        logger.info("  - Network configuration restored")
+        if not isinstance(self.os_handler, OtherHandler):
+            logger.info("  - VirtIO drivers installed")
+            logger.info("  - VMware Tools removed")
+            logger.info("  - Network configuration restored")
         logger.info("  - All NICs enabled")

@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import AppConfig, load_config
 from .exceptions import ConfigurationError, MigrationError
 from .migration import MigrationOrchestrator
+from .os_handlers import get_os_handler
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +16,21 @@ logger = logging.getLogger(__name__)
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="migrate",
-        description="Migrate Windows VMs from VMware vCenter to Proxmox VE",
+        description="Migrate VMs from VMware vCenter to Proxmox VE",
     )
 
     parser.add_argument(
         "--config", "-c", default="config.yaml",
         help="Path to YAML config file (default: config.yaml)",
+    )
+
+    # OS type
+    parser.add_argument(
+        "--os-type",
+        choices=["auto", "windows", "ubuntu", "other"],
+        default=None,
+        help="Guest OS type (default: auto-detect from vCenter guestId). "
+             "'other' skips all OS-specific steps.",
     )
 
     # Migration targets
@@ -225,10 +235,18 @@ def main():
         logger.error("Configuration error: %s", exc)
         sys.exit(1)
 
-    orchestrators = [
-        MigrationOrchestrator(cfg, skip_to=runtime["skip_to"], dry_run=runtime["dry_run"])
-        for cfg in configs
-    ]
+    orchestrators = []
+    for cfg in configs:
+        os_type = cfg.migration.os_type
+        handler = get_os_handler(os_type) if os_type != "auto" else None
+        orchestrators.append(
+            MigrationOrchestrator(
+                cfg,
+                skip_to=runtime["skip_to"],
+                dry_run=runtime["dry_run"],
+                os_handler=handler,
+            )
+        )
 
     try:
         if runtime["parallel"] and len(orchestrators) > 1:

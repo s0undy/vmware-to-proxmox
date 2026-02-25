@@ -36,9 +36,10 @@ proxmox:
 
 # ---------------------------------------------------------------------------
 # Guest OS credentials (for running scripts inside the VM via VMware Tools)
+# Optional when os_type is "other" (no guest operations needed for appliances).
 # ---------------------------------------------------------------------------
 guest:
-  user: "Administrator"              # --guest-user
+  user: "Administrator"              # --guest-user  (use root for Linux)
   password: ""                       # --guest-password  (or GUEST_PASSWORD env var)
 
 # ---------------------------------------------------------------------------
@@ -48,6 +49,9 @@ migration:
   migration_datastore: ""            # --migration-datastore       (required)
   proxmox_storage: ""                # --proxmox-storage          (required)
   proxmox_final_storage: ""          # --proxmox-final-storage    (step 9: move disks here as qcow2)
+  os_type: "auto"                    # --os-type  (auto, windows, ubuntu, other)
+                                      #   auto   = detect from vCenter guestId
+                                      #   other  = skip all OS-specific steps (appliances)
   start_vm_before_move: true         # --start-vm-before-move / --no-start-vm-before-move
   enable_nics_on_boot: false         # --enable-nics-on-boot  (NICs start enabled; halves boot wait timers)
 
