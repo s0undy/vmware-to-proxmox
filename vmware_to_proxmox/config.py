@@ -146,6 +146,11 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     px_ssh_port = int(_pick(args.proxmox_ssh_port, px_yaml.get("ssh_port"), 22))
 
     # ------------------------------------------------------------------
+    # OS type (needed before guest validation)
+    # ------------------------------------------------------------------
+    os_type = _pick(args.os_type, mig_yaml.get("os_type"), "auto")
+
+    # ------------------------------------------------------------------
     # Guest (optional when os_type is "other" — no guest operations needed)
     # ------------------------------------------------------------------
     guest_user = args.guest_user or guest_yaml.get("user", "")
@@ -193,7 +198,6 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     migration_ds = args.migration_datastore or mig_yaml.get("migration_datastore")
     px_storage = args.proxmox_storage or mig_yaml.get("proxmox_storage")
     px_final_storage = args.proxmox_final_storage or mig_yaml.get("proxmox_final_storage", "")
-    os_type = _pick(args.os_type, mig_yaml.get("os_type"), "auto")
     start_vm_before_move = bool(_pick(
         args.start_vm_before_move, mig_yaml.get("start_vm_before_move"), True
     ))
