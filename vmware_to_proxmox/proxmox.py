@@ -150,13 +150,18 @@ class ProxmoxClient:
 
         # Disks — preserve order from vCenter
         for i, disk in enumerate(vm_config["disks"]):
-            size_gb = int(disk["size_gb"]) or 1
+            size_gb = int(disk["size_gb"])
+            if size_gb <= 0:
+                logger.warning("  Disk scsi%d: reported size is %s GB — defaulting to 1 GB", i, disk["size_gb"])
+                size_gb = 1
             params[f"scsi{i}"] = f"{storage}:{size_gb},format=vmdk,ssd=1,discard=on,iothread=1"
 
         # NICs — preserve order, use ordered bridge list
         bridges = [b.strip() for b in migration_config.proxmox_bridges.split(",")]
         for i, nic in enumerate(vm_config["nics"]):
             bridge = bridges[min(i, len(bridges) - 1)]
+            if i >= len(bridges):
+                logger.warning("  NIC net%d: reusing bridge %s (no bridge specified for this NIC)", i, bridge)
             if migration_config.enable_nics_on_boot:
                 params[f"net{i}"] = f"virtio,bridge={bridge}"
             else:
@@ -479,6 +484,11 @@ class ProxmoxClient:
             self._ssh.close()
             self._ssh = None
 
+    def close(self):
+        """Close all connections (SSH and API)."""
+        self.close_ssh()
+        self.api = None
+
     # ------------------------------------------------------------------
     # Storage path resolution
     # ------------------------------------------------------------------
@@ -521,62 +531,63 @@ class ProxmoxClient:
         storage_path = self.get_storage_path(storage_name)
         proxmox_images_dir = f"{storage_path}/images/{vmid}"
 
-        for i, disk in enumerate(vm_config["disks"]):
-            vmware_filename = disk["filename"]  # e.g. "[datastore] VM1/VM1.vmdk"
+        try:
+            for i, disk in enumerate(vm_config["disks"]):
+                vmware_filename = disk["filename"]  # e.g. "[datastore] VM1/VM1.vmdk"
 
-            # Parse "[datastore] path/to/file.vmdk" → "path/to/file.vmdk"
-            match = re.match(r"\[.*?]\s*(.+)", vmware_filename)
-            if not match:
-                raise ProxmoxOperationError(
-                    f"Cannot parse VMware disk filename: {vmware_filename}"
-                )
-            relative_path = match.group(1)  # e.g. "VM1/VM1.vmdk"
+                # Parse "[datastore] path/to/file.vmdk" → "path/to/file.vmdk"
+                match = re.match(r"\[.*?]\s*(.+)", vmware_filename)
+                if not match:
+                    raise ProxmoxOperationError(
+                        f"Cannot parse VMware disk filename: {vmware_filename}"
+                    )
+                relative_path = match.group(1)  # e.g. "VM1/VM1.vmdk"
 
-            parts = relative_path.split("/")
-            if len(parts) >= 2:
-                vm_folder = "/".join(parts[:-1])
-            else:
-                vm_folder = ""
-
-            # Source: VMware descriptor on shared NFS
-            vmware_descriptor_path = f"{storage_path}/{relative_path}"
-
-            # Destination: Proxmox descriptor
-            proxmox_disk_name = f"vm-{vmid}-disk-{i}.vmdk"
-            proxmox_descriptor_path = f"{proxmox_images_dir}/{proxmox_disk_name}"
-
-            logger.info("  Disk scsi%d: %s -> %s", i, vmware_filename, proxmox_disk_name)
-
-            # Read the VMware descriptor
-            descriptor_content = self._ssh_read_file(vmware_descriptor_path)
-
-            # Validate it looks like a descriptor (not a flat file)
-            if len(descriptor_content) > 10_000:
-                raise ProxmoxOperationError(
-                    f"File looks too large to be a VMDK descriptor ({len(descriptor_content)} bytes): "
-                    f"{vmware_descriptor_path}"
-                )
-
-            # Rewrite extent lines to use relative paths
-            extent_match = self._EXTENT_RE.search(descriptor_content)
-            if not extent_match:
-                raise ProxmoxOperationError(
-                    f"Cannot find extent line in VMDK descriptor: {vmware_descriptor_path}"
-                )
-
-            def _rewrite_extent(m):
-                original_flat_name = m.group(2)
-                if vm_folder:
-                    new_ref = f"../../{vm_folder}/{original_flat_name}"
+                parts = relative_path.split("/")
+                if len(parts) >= 2:
+                    vm_folder = "/".join(parts[:-1])
                 else:
-                    new_ref = f"../../{original_flat_name}"
-                return m.group(1) + new_ref + m.group(3)
+                    vm_folder = ""
 
-            new_descriptor = self._EXTENT_RE.sub(_rewrite_extent, descriptor_content)
+                # Source: VMware descriptor on shared NFS
+                vmware_descriptor_path = f"{storage_path}/{relative_path}"
 
-            # Write the modified descriptor to the Proxmox location
-            self._ssh_write_file(proxmox_descriptor_path, new_descriptor)
+                # Destination: Proxmox descriptor
+                proxmox_disk_name = f"vm-{vmid}-disk-{i}.vmdk"
+                proxmox_descriptor_path = f"{proxmox_images_dir}/{proxmox_disk_name}"
 
-            logger.info("    Extent rewritten: %s", extent_match.group(2))
+                logger.info("  Disk scsi%d: %s -> %s", i, vmware_filename, proxmox_disk_name)
 
-        self.close_ssh()
+                # Read the VMware descriptor
+                descriptor_content = self._ssh_read_file(vmware_descriptor_path)
+
+                # Validate it looks like a descriptor (not a flat file)
+                if len(descriptor_content) > 10_000:
+                    raise ProxmoxOperationError(
+                        f"File looks too large to be a VMDK descriptor ({len(descriptor_content)} bytes): "
+                        f"{vmware_descriptor_path}"
+                    )
+
+                # Rewrite extent lines to use relative paths
+                extent_match = self._EXTENT_RE.search(descriptor_content)
+                if not extent_match:
+                    raise ProxmoxOperationError(
+                        f"Cannot find extent line in VMDK descriptor: {vmware_descriptor_path}"
+                    )
+
+                def _rewrite_extent(m):
+                    original_flat_name = m.group(2)
+                    if vm_folder:
+                        new_ref = f"../../{vm_folder}/{original_flat_name}"
+                    else:
+                        new_ref = f"../../{original_flat_name}"
+                    return m.group(1) + new_ref + m.group(3)
+
+                new_descriptor = self._EXTENT_RE.sub(_rewrite_extent, descriptor_content)
+
+                # Write the modified descriptor to the Proxmox location
+                self._ssh_write_file(proxmox_descriptor_path, new_descriptor)
+
+                logger.info("    Extent rewritten: %s", extent_match.group(2))
+        finally:
+            self.close_ssh()
