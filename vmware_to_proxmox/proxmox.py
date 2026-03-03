@@ -247,6 +247,16 @@ class ProxmoxClient:
             ) from exc
         logger.info("  Reboot command sent for VMID %d", vmid)
 
+    def add_to_ha(self, vmid: int) -> None:
+        """Add a VM to the Proxmox HA manager."""
+        try:
+            self.api.cluster.ha.resources.create(sid=f"vm:{vmid}")
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to add VM {vmid} to HA: {exc}"
+            ) from exc
+        logger.info("  VM %d added to HA.", vmid)
+
     def mount_iso(self, vmid: int, storage: str, iso_filename: str) -> None:
         """Mount an ISO image on the VM's IDE CD/DVD drive."""
         node = self.config.node
