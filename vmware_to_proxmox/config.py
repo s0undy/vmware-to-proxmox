@@ -47,6 +47,7 @@ class MigrationConfig:
     os_type: str = "auto"
     start_vm_before_move: bool = True
     enable_nics_on_boot: bool = False
+    enable_ha: bool = False
     proxmox_vmid: int = 0
     proxmox_bridges: str = "vmbr0"
     max_cores: int = 0
@@ -204,6 +205,9 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     enable_nics_on_boot = bool(_pick(
         args.enable_nics_on_boot, mig_yaml.get("enable_nics_on_boot"), False
     ))
+    enable_ha = bool(_pick(
+        args.enable_ha, mig_yaml.get("enable_ha"), False
+    ))
     if not migration_ds:
         raise ConfigurationError("--migration-datastore is required")
     if not px_storage:
@@ -271,6 +275,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         os_type=os_type,
         start_vm_before_move=start_vm_before_move,
         enable_nics_on_boot=enable_nics_on_boot,
+        enable_ha=enable_ha,
         proxmox_vmid=0,
         proxmox_bridges=px_bridges,
         max_cores=max_cores,
@@ -297,7 +302,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
                 continue
             if key in ("proxmox_vmid", "max_cores", "max_sockets"):
                 val = int(val)
-            if key in ("start_vm_before_move", "enable_nics_on_boot"):
+            if key in ("start_vm_before_move", "enable_nics_on_boot", "enable_ha"):
                 val = bool(val)
             overrides[key] = val
         vm_migration = replace(migration_template, **overrides)

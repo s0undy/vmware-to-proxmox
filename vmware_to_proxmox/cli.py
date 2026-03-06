@@ -55,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-enable-nics-on-boot", dest="enable_nics_on_boot",
                         action="store_false",
                         help="Create NICs with link disabled (default, enables in step 14)")
+    parser.add_argument("--enable-ha", action="store_true", default=None,
+                        help="Add VM to Proxmox HA after migration completes (default: false)")
+    parser.add_argument("--no-enable-ha", dest="enable_ha", action="store_false",
+                        help="Do not add VM to Proxmox HA (default)")
 
     # vCenter
     parser.add_argument("--vcenter-host", help="vCenter hostname or IP")

@@ -72,6 +72,8 @@ class MigrationOrchestrator:
             self.log.info("  *** DRY RUN — no changes will be made ***")
         if self.config.migration.enable_nics_on_boot:
             self.log.info("  NICs on boot:        enabled (reduced wait timers)")
+        if self.config.migration.enable_ha:
+            self.log.info("  HA:                  enabled")
         if self.skip_to > 1:
             self.log.info("  Resuming from step %d", self.skip_to)
         self.log.info("=" * 60)
@@ -126,6 +128,22 @@ class MigrationOrchestrator:
             step_elapsed = time.monotonic() - step_start
             step_min, step_sec = divmod(int(step_elapsed), 60)
             self.log.info("  Step %d completed in %dm %ds", num, step_min, step_sec)
+
+        # Enroll VM in Proxmox HA if configured (must be last, after all steps)
+        if self.config.migration.enable_ha:
+            vmid = self._resolve_vmid()
+            self.log.info("")
+            self.log.info("POST-MIGRATION: Adding VM to Proxmox HA")
+            self.log.info("-" * 40)
+            if self.dry_run:
+                self.log.info("  DRY RUN: would add VMID %d to HA", vmid)
+            else:
+                try:
+                    self.px.add_to_ha(vmid)
+                    self.log.info("  VM %d enrolled in HA.", vmid)
+                except ProxmoxOperationError as exc:
+                    self.log.warning("  Failed to add VM to HA: %s", exc)
+                    self.log.warning("  You can add it manually: ha-manager add vm:%d", vmid)
 
         # Query guest agent for primary IP address
         ip_address = None
@@ -481,3 +499,5 @@ class MigrationOrchestrator:
             self.log.info("  - VMware Tools removed")
             self.log.info("  - Network configuration restored")
         self.log.info("  - All NICs enabled")
+        if self.config.migration.enable_ha:
+            self.log.info("  - High Availability enabled")
