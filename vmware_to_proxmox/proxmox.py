@@ -136,6 +136,7 @@ class ProxmoxClient:
             "agent": "1",
             "numa": 1,
             "tablet": 1,
+            "ide2": "none,media=cdrom",
         }
 
         # Disks — preserve order from vCenter
@@ -246,17 +247,6 @@ class ProxmoxClient:
                 f"Failed to add VM {vmid} to HA: {exc}"
             ) from exc
         logger.info("  VM %d added to HA.", vmid)
-
-    def add_cdrom(self, vmid: int) -> None:
-        """Add an empty CD/DVD drive to the VM."""
-        node = self.config.node
-        try:
-            self.api.nodes(node).qemu(vmid).config.put(ide2="none,media=cdrom")
-        except Exception as exc:
-            raise ProxmoxOperationError(
-                f"Failed to add CD-ROM drive to VM {vmid}: {exc}"
-            ) from exc
-        logger.info("  CD-ROM drive (ide2) added to VM %d.", vmid)
 
     def mount_iso(self, vmid: int, storage: str, iso_filename: str) -> None:
         """Mount an ISO image on the VM's IDE CD/DVD drive."""

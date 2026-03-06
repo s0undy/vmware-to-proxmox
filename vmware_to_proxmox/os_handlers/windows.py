@@ -70,27 +70,16 @@ class WindowsHandler(OSHandler):
         logger.info("  VirtIO guest tools installed.")
 
     def step_11_install_virtio_drivers(self, ctx: StepContext):
-        from ..migration import (
-            ISO_MOUNT_WAIT_SECONDS, VIRTIO_INSTALL_SETTLE_SECONDS,
-            POST_REBOOT_BOOT_SECONDS,
-        )
+        from ..migration import ISO_MOUNT_WAIT_SECONDS, VIRTIO_INSTALL_SETTLE_SECONDS
 
         iso_storage = ctx.config.migration.virtio_iso_storage
         iso_filename = ctx.config.migration.virtio_iso_filename
 
         if ctx.dry_run:
-            ctx.log.info("  DRY RUN: would add CD-ROM, reboot, mount %s:iso/%s on VMID %d "
-                         "and install VirtIO drivers", iso_storage, iso_filename, ctx.vmid)
+            ctx.log.info("  DRY RUN: would mount %s:iso/%s on VMID %d and install VirtIO drivers",
+                         iso_storage, iso_filename, ctx.vmid)
             return
 
-        self._wait_and_connect_agent(ctx)
-
-        # Add CD-ROM drive and reboot so Windows detects it before mounting ISO.
-        # The CD-ROM is not created at VM creation time to avoid claiming a
-        # drive letter (e.g. D:) that belongs to an existing data disk.
-        ctx.log.info("  Adding CD-ROM drive (ide2) ...")
-        ctx.px.add_cdrom(ctx.vmid)
-        self._reboot_and_wait(ctx, pre_seconds=0, post_seconds=POST_REBOOT_BOOT_SECONDS)
         self._wait_and_connect_agent(ctx)
 
         # Mount the VirtIO ISO
