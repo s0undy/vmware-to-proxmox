@@ -93,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--proxmox-bridges",
                         help="Comma-separated bridge list for NICs in order "
                              "(e.g. vmbr0,vmbr1). Last bridge reused for extra NICs.")
+    parser.add_argument("--cpu-type", default=None,
+                        help="CPU type for the VM (default: host)")
+    parser.add_argument("--cpu-flags", default=None,
+                        help="Extra CPU flags to add or remove "
+                             "(e.g. '+aes,-vmx')")
     parser.add_argument("--max-cores", type=int, default=None,
                         help="Maximum cores per socket (0 = no limit, default: 0)")
     parser.add_argument("--max-sockets", type=int, default=None,

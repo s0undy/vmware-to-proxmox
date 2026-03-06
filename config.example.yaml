@@ -54,13 +54,16 @@ migration:
                                       #   other  = skip all OS-specific steps (appliances)
   start_vm_before_move: true         # --start-vm-before-move / --no-start-vm-before-move
   enable_nics_on_boot: false         # --enable-nics-on-boot  (NICs start enabled; halves boot wait timers)
+  enable_ha: false                   # --enable-ha            (add VM to Proxmox HA after migration)
 
   # NIC bridges — comma-separated, mapped to NICs in order.
   # If fewer bridges than NICs, the last bridge is reused.
   # Example: "vmbr0,vmbr1" with 3 NICs → net0=vmbr0, net1=vmbr1, net2=vmbr1
   proxmox_bridges: "vmbr0"          # --proxmox-bridges  (shared default, overridable per VM)
 
-  # CPU limits (shared defaults, overridable per VM)
+  # CPU settings (shared defaults, overridable per VM)
+  cpu_type: "host"                   # --cpu-type     (Proxmox CPU type, e.g. host, kvm64, x86-64-v2-AES)
+  cpu_flags: ""                      # --cpu-flags    (extra CPU flags, e.g. "+aes,-vmx")
   max_cores: 0                       # --max-cores    (0 = use vCenter vCPU count as-is)
   max_sockets: 1                     # --max-sockets  (default: 1)
 
@@ -94,14 +97,20 @@ migration:
       proxmox_vmid:                 # 0 = next available
       proxmox_bridges: "vmbr0"
       proxmox_final_storage: ""     # override final storage for this VM
+      cpu_type: "host"
+      cpu_flags: ""
       max_cores: 2
       max_sockets: 1
+      enable_ha: false
     # - vm_name: ""
     #   proxmox_vmid: 0
     #   proxmox_bridges: "vmbr1"     # override bridge for this VM
     #   proxmox_final_storage: ""    # override final storage for this VM
+    #   cpu_type: "x86-64-v2-AES"   # override CPU type for this VM
+    #   cpu_flags: "+aes"            # override CPU flags for this VM
     #   max_cores: 4                 # override CPU config for this VM
     #   max_sockets: 2
+    #   enable_ha: true              # override HA for this VM
     #   guest_user: "OtherAdmin"     # override guest credentials for this VM
     #   guest_password: ""
 
