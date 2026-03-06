@@ -213,10 +213,14 @@ class MigrationOrchestrator:
         vm_config = self.vc.get_vm_config(vm)
         self._vm_config = vm_config
 
+        cpu_display = self.config.migration.cpu_type
+        if self.config.migration.cpu_flags:
+            cpu_display = f"{cpu_display},{self.config.migration.cpu_flags}"
         self.log.info("  CPUs:     %d  (%d sockets x %d cores)",
                       vm_config["num_cpus"],
                       max(1, vm_config["num_cpus"] // vm_config["num_cores_per_socket"]),
                       vm_config["num_cores_per_socket"])
+        self.log.info("  CPU type: %s", cpu_display)
         self.log.info("  Memory:   %d MB", vm_config["memory_mb"])
         self.log.info("  Firmware: %s", vm_config["firmware"])
         for i, d in enumerate(vm_config["disks"]):
