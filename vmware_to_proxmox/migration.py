@@ -145,9 +145,10 @@ class MigrationOrchestrator:
                     self.log.warning("  Failed to add VM to HA: %s", exc)
                     self.log.warning("  You can add it manually: ha-manager add vm:%d", vmid)
 
-        # Query guest agent for primary IP address
+        # Query guest agent for primary IP address (skip when HA is enabled
+        # because Proxmox may migrate the VM to another node after enrollment).
         ip_address = None
-        if not self.dry_run:
+        if not self.dry_run and not self.config.migration.enable_ha:
             vmid = self._resolve_vmid()
             self._wait_for_vm_ready(vmid)
             self.log.info("  Waiting for QEMU guest agent ...")
