@@ -54,7 +54,10 @@ All settings in `config.yaml` can be overridden with CLI flags. Run `python migr
 | `--dry-run` | Log actions without making changes |
 | `--skip-to N` | Resume from step N (1-14) |
 | `--parallel` | Migrate all VMs concurrently |
+| `--cpu-type TYPE` | Proxmox CPU type (default: `host`) |
+| `--cpu-flags FLAGS` | Extra CPU flags (e.g. `+aes,-vmx`) |
 | `--enable-nics-on-boot` | Boot with NICs enabled (halves wait timers, faster for domain-joined VMs) |
+| `--enable-ha` | Add VM to Proxmox HA after migration |
 | `--verbose` | Debug-level logging |
 
 ### NIC boot mode
@@ -82,8 +85,10 @@ migration:
       proxmox_vmid: 201
       proxmox_bridges: "vmbr1"
       proxmox_final_storage: "ceph-pool"
+      cpu_type: "x86-64-v2-AES"
       max_cores: 4
       enable_nics_on_boot: true
+      enable_ha: true
 ```
 
 Sequential by default. Use `--parallel` for concurrent migration.
@@ -94,6 +99,9 @@ A single VM via CLI: `python migrate.py --vm-name "my-vm"`
 
 | Setting | CLI flag | Default |
 |---|---|---|
+| `cpu_type` | `--cpu-type` | `host` |
+| `cpu_flags` | `--cpu-flags` | _(empty)_ |
+| `enable_ha` | `--enable-ha` | `false` |
 | `virtio_iso_storage` | `--virtio-iso-storage` | `local` |
 | `virtio_iso_filename` | `--virtio-iso-filename` | `virtio-win-0.1.271-1.iso` |
 | `purge_vmware_script` | `--purge-vmware-script` | `C:\TMP\pveMigration\purge-vmware-tools.ps1` |

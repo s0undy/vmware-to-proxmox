@@ -38,14 +38,6 @@ GUEST_ID_TO_OSTYPE = {
     "debian12_64Guest": "l26",
 }
 
-# Guest IDs for which nested virtualisation must be explicitly disabled.
-NO_NESTED_VIRT_GUEST_IDS = {
-    "windows11_64Guest",
-    "windows12_64Guest",
-    "windows2022srvNext_64Guest",
-    "windows2025srv_64Guest",
-    "windows2025srvNext_64Guest",
-}
 
 
 class ProxmoxClient:
@@ -123,8 +115,6 @@ class ProxmoxClient:
         # CPU type ------------------------------------------------------
         cpu_type = migration_config.cpu_type
         guest_id = vm_config["guest_id"]
-        if guest_id in NO_NESTED_VIRT_GUEST_IDS and "-vmx" not in cpu_type:
-            cpu_type = f"{cpu_type},-vmx"
         if migration_config.cpu_flags:
             cpu_type = f"{cpu_type},{migration_config.cpu_flags}"
 
