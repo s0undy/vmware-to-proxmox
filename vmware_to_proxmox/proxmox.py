@@ -206,7 +206,8 @@ class ProxmoxClient:
                 return
             time.sleep(3)
 
-    def move_disk(self, vmid: int, disk: str, target_storage: str) -> None:
+    def move_disk(self, vmid: int, disk: str, target_storage: str,
+                  timeout: int = 3600) -> None:
         """Move a VM disk to another storage, converting to qcow2.
 
         The source disk is kept (delete=0).
@@ -224,7 +225,7 @@ class ProxmoxClient:
             raise ProxmoxOperationError(
                 f"Failed to move disk {disk} for VM {vmid}: {exc}"
             ) from exc
-        self.wait_for_task(upid)
+        self.wait_for_task(upid, timeout=timeout)
         logger.info("    %s move complete.", disk)
 
     def reboot_vm(self, vmid: int) -> None:

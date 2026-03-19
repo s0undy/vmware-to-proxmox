@@ -63,6 +63,7 @@ class MigrationConfig:
     virtio_iso_filename: str = "virtio-win-0.1.271-1.iso"
     purge_vmware_script: str = r"C:\TMP\pveMigration\purge-vmware-tools.ps1"
     import_nic_script: str = r"C:\TMP\pveMigration\importNicConfig.ps1"
+    disk_move_timeout: int = 14400
 
 
 _MIGRATION_FIELD_NAMES = {f.name for f in fields(MigrationConfig)}
@@ -246,6 +247,8 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     import_nic_script = (args.import_nic_script
                          or mig_yaml.get("import_nic_script",
                                          r"C:\TMP\pveMigration\importNicConfig.ps1"))
+    disk_move_timeout = int(_pick(args.disk_move_timeout,
+                                  mig_yaml.get("disk_move_timeout"), 14400))
 
     # ------------------------------------------------------------------
     # Build per-VM configs
@@ -295,6 +298,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         virtio_iso_filename=virtio_iso_filename,
         purge_vmware_script=purge_vmware_script,
         import_nic_script=import_nic_script,
+        disk_move_timeout=disk_move_timeout,
     )
 
     app_configs: list[AppConfig] = []
@@ -306,7 +310,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         for key, val in entry.items():
             if key not in _MIGRATION_FIELD_NAMES:
                 continue
-            if key in ("proxmox_vmid", "max_cores", "max_sockets"):
+            if key in ("proxmox_vmid", "max_cores", "max_sockets", "disk_move_timeout"):
                 val = int(val)
             if key in ("start_vm_before_move", "enable_nics_on_boot", "enable_ha"):
                 val = bool(val)

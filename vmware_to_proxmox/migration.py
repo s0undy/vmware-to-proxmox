@@ -299,6 +299,7 @@ class MigrationOrchestrator:
         vm_config = self._resolve_vm_config(vm)
         final_storage = self.config.migration.proxmox_final_storage
         start_before = self.config.migration.start_vm_before_move
+        disk_move_timeout = self.config.migration.disk_move_timeout
 
         if not final_storage:
             raise MigrationError(
@@ -312,7 +313,11 @@ class MigrationOrchestrator:
             disks_to_move.append("efidisk0")
 
         total = len(disks_to_move)
-        self.log.info("  %d disk(s) to move.", total)
+        self.log.info("  %d disk(s) to move (timeout %ds per disk).", total, disk_move_timeout)
+
+        # Query live Proxmox config to detect already-moved disks
+        if not self.dry_run:
+            px_config = self.px.get_vm_config_proxmox(vmid)
 
         # Move disks one at a time with progress
         for idx, disk_name in enumerate(disks_to_move, start=1):
@@ -321,8 +326,16 @@ class MigrationOrchestrator:
                 self.log.info("  DRY RUN: [%d/%d %3d%%] would move %s -> %s (qcow2)",
                               idx, total, pct, disk_name, final_storage)
                 continue
+
+            # Skip disks already on final storage (idempotent resume)
+            current_value = px_config.get(disk_name, "")
+            if current_value.startswith(f"{final_storage}:"):
+                self.log.info("  [%d/%d %3d%%] %s already on %s — skipping.",
+                              idx, total, pct, disk_name, final_storage)
+                continue
+
             self.log.info("  [%d/%d %3d%%] Moving %s ...", idx, total, pct, disk_name)
-            self.px.move_disk(vmid, disk_name, final_storage)
+            self.px.move_disk(vmid, disk_name, final_storage, timeout=disk_move_timeout)
 
         self.log.info("  All disks moved to %s.", final_storage)
 
