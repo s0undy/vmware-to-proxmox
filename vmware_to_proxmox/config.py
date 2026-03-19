@@ -50,6 +50,8 @@ class MigrationConfig:
     enable_ha: bool = False
     proxmox_vmid: int = 0
     proxmox_bridges: str = "vmbr0"
+    cpu_type: str = "host"
+    cpu_flags: str = ""
     max_cores: int = 0
     max_sockets: int = 1
     staging_dir: str = r"C:\TMP\pveMigration"
@@ -214,6 +216,8 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         raise ConfigurationError("--proxmox-storage is required")
 
     px_bridges = args.proxmox_bridges or mig_yaml.get("proxmox_bridges", "vmbr0")
+    cpu_type = _pick(args.cpu_type, mig_yaml.get("cpu_type"), "host")
+    cpu_flags = _pick(args.cpu_flags, mig_yaml.get("cpu_flags"), "")
     max_cores = int(_pick(args.max_cores, mig_yaml.get("max_cores"), 0))
     max_sockets = int(_pick(args.max_sockets, mig_yaml.get("max_sockets"), 1))
 
@@ -278,6 +282,8 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         enable_ha=enable_ha,
         proxmox_vmid=0,
         proxmox_bridges=px_bridges,
+        cpu_type=cpu_type,
+        cpu_flags=cpu_flags,
         max_cores=max_cores,
         max_sockets=max_sockets,
         staging_dir=staging_dir,

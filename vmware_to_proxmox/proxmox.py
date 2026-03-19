@@ -38,14 +38,6 @@ GUEST_ID_TO_OSTYPE = {
     "debian12_64Guest": "l26",
 }
 
-# Guest IDs for which nested virtualisation must be explicitly disabled.
-NO_NESTED_VIRT_GUEST_IDS = {
-    "windows11_64Guest",
-    "windows12_64Guest",
-    "windows2022srvNext_64Guest",
-    "windows2025srv_64Guest",
-    "windows2025srvNext_64Guest",
-}
 
 
 class ProxmoxClient:
@@ -121,11 +113,10 @@ class ProxmoxClient:
             cores = total_cpus
 
         # CPU type ------------------------------------------------------
+        cpu_type = migration_config.cpu_type
         guest_id = vm_config["guest_id"]
-        if guest_id in NO_NESTED_VIRT_GUEST_IDS:
-            cpu_type = "host,-vmx"
-        else:
-            cpu_type = "host"
+        if migration_config.cpu_flags:
+            cpu_type = f"{cpu_type},{migration_config.cpu_flags}"
 
         bios = "ovmf" if vm_config["firmware"] == "efi" else "seabios"
         ostype = GUEST_ID_TO_OSTYPE.get(guest_id, "other")
@@ -145,7 +136,7 @@ class ProxmoxClient:
             "agent": "1",
             "numa": 1,
             "tablet": 1,
-            "ide0": "none,media=cdrom",
+            "ide2": "none,media=cdrom",
         }
 
         # Disks — preserve order from vCenter
@@ -260,25 +251,25 @@ class ProxmoxClient:
     def mount_iso(self, vmid: int, storage: str, iso_filename: str) -> None:
         """Mount an ISO image on the VM's IDE CD/DVD drive."""
         node = self.config.node
-        ide0_value = f"{storage}:iso/{iso_filename},media=cdrom"
+        ide2_value = f"{storage}:iso/{iso_filename},media=cdrom"
         try:
-            self.api.nodes(node).qemu(vmid).config.put(ide0=ide0_value)
+            self.api.nodes(node).qemu(vmid).config.put(ide2=ide2_value)
         except Exception as exc:
             raise ProxmoxOperationError(
                 f"Failed to mount ISO on VM {vmid}: {exc}"
             ) from exc
-        logger.info("  Mounted ISO: %s", ide0_value)
+        logger.info("  Mounted ISO: %s", ide2_value)
 
     def unmount_iso(self, vmid: int) -> None:
         """Unmount the ISO from the VM's IDE CD/DVD drive (keep the drive)."""
         node = self.config.node
         try:
-            self.api.nodes(node).qemu(vmid).config.put(ide0="none,media=cdrom")
+            self.api.nodes(node).qemu(vmid).config.put(ide2="none,media=cdrom")
         except Exception as exc:
             raise ProxmoxOperationError(
                 f"Failed to unmount ISO on VM {vmid}: {exc}"
             ) from exc
-        logger.info("  ISO unmounted (ide0 reset to empty).")
+        logger.info("  ISO unmounted (ide2 reset to empty).")
 
     def wait_for_guest_agent(self, vmid: int, timeout: int = 300) -> None:
         """Block until the QEMU guest agent responds to a ping."""
