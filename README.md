@@ -108,6 +108,7 @@ A single VM via CLI: `python migrate.py --vm-name "my-vm"`
 | `import_nic_script` | `--import-nic-script` | `C:\TMP\pveMigration\importNicConfig.ps1` |
 | `start_vm_before_move` | `--start-vm-before-move` | `true` |
 | `enable_nics_on_boot` | `--enable-nics-on-boot` | `false` |
+| `disk_move_timeout` | `--disk-move-timeout` | `14400` (4 hours) |
 
 ---
 

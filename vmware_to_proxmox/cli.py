@@ -44,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Proxmox storage target for VM disks")
     parser.add_argument("--proxmox-final-storage",
                         help="Proxmox storage for final disk location (step 9 moves disks here as qcow2)")
+    parser.add_argument("--disk-move-timeout", type=int, default=None,
+                        help="Timeout in seconds for each disk move in step 9 (default: 14400 = 4 hours)")
     parser.add_argument("--start-vm-before-move", action="store_true", default=None,
                         help="Start VM before moving disks (default: true)")
     parser.add_argument("--no-start-vm-before-move", dest="start_vm_before_move",
