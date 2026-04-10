@@ -46,6 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Proxmox storage for final disk location (step 9 moves disks here as qcow2)")
     parser.add_argument("--disk-move-timeout", type=int, default=None,
                         help="Timeout in seconds for each disk move in step 9 (default: 14400 = 4 hours)")
+    parser.add_argument("--disk-conversion-backend",
+                        choices=["proxmox-native", "netapp-shift"],
+                        default=None,
+                        help="Backend that owns steps 6-10 (default: proxmox-native)")
     parser.add_argument("--start-vm-before-move", action="store_true", default=None,
                         help="Start VM before moving disks (default: true)")
     parser.add_argument("--no-start-vm-before-move", dest="start_vm_before_move",
@@ -88,6 +92,18 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Proxmox API token name (alternative to password)")
     parser.add_argument("--proxmox-token-value",
                         help="Proxmox API token value")
+
+    # NetApp Shift (required when --disk-conversion-backend=netapp-shift)
+    parser.add_argument("--netapp-shift-host",
+                        help="NetApp Shift hostname or IP")
+    parser.add_argument("--netapp-shift-user",
+                        help="NetApp Shift username")
+    parser.add_argument("--netapp-shift-password",
+                        help="NetApp Shift password (or NETAPP_SHIFT_PASSWORD env var)")
+    parser.add_argument("--netapp-shift-port", type=int, default=None,
+                        help="NetApp Shift API port (default: 443)")
+    parser.add_argument("--netapp-shift-verify-ssl", action="store_true", default=None,
+                        help="Verify SSL certificate for NetApp Shift")
 
     # Proxmox VM options
     parser.add_argument("--proxmox-vmid", type=int, default=None,

@@ -3,6 +3,7 @@
 import logging
 import time
 
+from .backends import BackendContext, get_backend
 from .config import AppConfig
 from .exceptions import MigrationError, ProxmoxOperationError, ProxmoxConnectionError
 from .guest_ops import GuestOperations
@@ -47,6 +48,7 @@ class MigrationOrchestrator:
         self.px = ProxmoxClient(config.proxmox)
         self.guest_ops = None
         self.log = _VMLoggerAdapter(logger, {"vm": config.migration.vm_name})
+        self.backend = get_backend(config)
 
     # ------------------------------------------------------------------
     # Public
@@ -97,6 +99,9 @@ class MigrationOrchestrator:
             self.log.info("  Auto-detected OS type: %s  (guestId: %s)", detected, guest_id)
             self.os_handler = get_os_handler(detected)
         self.log.info("  OS handler:          %s", self.os_handler.os_label)
+        self.log.info("  Disk backend:        %s", self.backend.name)
+
+        self.backend.prepare(self._build_backend_context())
 
         steps = [
             (1, "Storage vMotion", self._step_1_storage_vmotion),
@@ -249,143 +254,33 @@ class MigrationOrchestrator:
             vm, self.guest_ops, self.config, self.dry_run)
 
     def _step_6_shutdown(self, vm):
-        if self.dry_run:
-            self.log.info("  DRY RUN: would shut down %s", vm.name)
-            return
-
-        self.log.info("  Sending shutdown signal ...")
-        self.vc.shutdown_guest(vm)
-        self.log.info("  VM is powered off.")
-        self.log.info("  Waiting %ds for clean shutdown ...", SHUTDOWN_SETTLE_SECONDS)
-        time.sleep(SHUTDOWN_SETTLE_SECONDS)
+        self.backend.step_6_shutdown(self._build_backend_context(), vm)
 
     def _step_7_rewrite_vmdk_descriptors(self, vm):
-        vm_config = self._resolve_vm_config(vm)
-        vmid = self._resolve_vmid()
-
-        if self.dry_run:
-            for i, d in enumerate(vm_config["disks"]):
-                self.log.info("  DRY RUN: would rewrite scsi%d: %s -> vm-%d-disk-%d.vmdk",
-                              i, d["filename"], vmid, i)
-            return
-
-        self.px.rewrite_vmdk_descriptors(
-            vmid=vmid,
-            vm_config=vm_config,
-            storage_name=self.config.migration.proxmox_storage,
-        )
-        self.log.info("  All VMDK descriptors rewritten.")
+        self.backend.step_7_rewrite_vmdk_descriptors(self._build_backend_context(), vm)
 
     def _step_8_start_vm(self, vm):
-        vmid = self._resolve_vmid()
-        start_before = self.config.migration.start_vm_before_move
-
-        if not start_before:
-            self.log.info("  start_vm_before_move=false — VM will start after disks are moved.")
-            return
-
-        if self.dry_run:
-            self.log.info("  DRY RUN: would start VMID %d", vmid)
-            return
-
-        self.px.start_vm(vmid)
-        self.log.info("  VM %d start command sent. Waiting %ds for VM to boot ...",
-                      vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
-        self._sleep(VM_START_SETTLE_SECONDS)
-        self.log.info("  Ready to proceed.")
+        self.backend.step_8_start_vm(self._build_backend_context(), vm)
 
     def _step_9_move_disks(self, vm):
-        vmid = self._resolve_vmid()
-        vm_config = self._resolve_vm_config(vm)
-        final_storage = self.config.migration.proxmox_final_storage
-        start_before = self.config.migration.start_vm_before_move
-        disk_move_timeout = self.config.migration.disk_move_timeout
-
-        if not final_storage:
-            raise MigrationError(
-                "Cannot move disks: proxmox_final_storage is not set. "
-                "Set --proxmox-final-storage or proxmox_final_storage in config."
-            )
-
-        # Build list of all disks to move
-        disks_to_move = [f"scsi{i}" for i in range(len(vm_config["disks"]))]
-        if vm_config["firmware"] == "efi":
-            disks_to_move.append("efidisk0")
-
-        total = len(disks_to_move)
-        self.log.info("  %d disk(s) to move (timeout %ds per disk).", total, disk_move_timeout)
-
-        # Query live Proxmox config to detect already-moved disks
-        if not self.dry_run:
-            px_config = self.px.get_vm_config_proxmox(vmid)
-
-        # Move disks one at a time with progress
-        for idx, disk_name in enumerate(disks_to_move, start=1):
-            pct = int(idx / total * 100)
-            if self.dry_run:
-                self.log.info("  DRY RUN: [%d/%d %3d%%] would move %s -> %s (qcow2)",
-                              idx, total, pct, disk_name, final_storage)
-                continue
-
-            # Skip disks already on final storage (idempotent resume)
-            current_value = px_config.get(disk_name, "")
-            if current_value.startswith(f"{final_storage}:"):
-                self.log.info("  [%d/%d %3d%%] %s already on %s — skipping.",
-                              idx, total, pct, disk_name, final_storage)
-                continue
-
-            self.log.info("  [%d/%d %3d%%] Moving %s ...", idx, total, pct, disk_name)
-            self.px.move_disk(vmid, disk_name, final_storage, timeout=disk_move_timeout)
-
-        self.log.info("  All disks moved to %s.", final_storage)
-
-        # Start VM after move if not started in step 8
-        if not start_before:
-            if self.dry_run:
-                self.log.info("  DRY RUN: would start VMID %d after move", vmid)
-                return
-            self.log.info("  Starting VM after disk move ...")
-            self.px.start_vm(vmid)
-            self.log.info("  VM %d start command sent. Waiting %ds for VM to boot ...",
-                          vmid, self._effective_wait(VM_START_SETTLE_SECONDS))
-            self._sleep(VM_START_SETTLE_SECONDS)
-            self.log.info("  Ready to proceed.")
+        self.backend.step_9_move_disks(self._build_backend_context(), vm)
 
     def _step_10_verify(self, vm):
-        vmid = self._resolve_vmid()
-        vm_config = self._resolve_vm_config(vm)
-        final_storage = self.config.migration.proxmox_final_storage
+        self.backend.step_10_verify(self._build_backend_context(), vm)
 
-        if self.dry_run:
-            self.log.info("  DRY RUN: would verify VMID %d is running on %s", vmid, final_storage)
-            return
-
-        # Verify VM is running
-        status = self.px.get_vm_status(vmid)
-        self.log.info("  VM %d status: %s", vmid, status)
-        if status != "running":
-            raise ProxmoxOperationError(
-                f"VM {vmid} is not running (status: {status})"
-            )
-
-        # Verify all disks are on the final storage
-        px_config = self.px.get_vm_config_proxmox(vmid)
-        disk_keys = [f"scsi{i}" for i in range(len(vm_config["disks"]))]
-        if vm_config["firmware"] == "efi":
-            disk_keys.append("efidisk0")
-
-        for key in disk_keys:
-            value = px_config.get(key, "")
-            if not value.startswith(f"{final_storage}:"):
-                raise ProxmoxOperationError(
-                    f"Disk {key} is not on final storage {final_storage}: {value}"
-                )
-            self.log.info("  %s: %s", key, value)
-
-        self.log.info("  Verification passed — all disks on %s, VM running.", final_storage)
-
-        self.log.info("  Waiting %ds for VM to fully boot ...", self._effective_wait(VM_FULL_BOOT_SECONDS))
-        self._sleep(VM_FULL_BOOT_SECONDS)
+    def _build_backend_context(self) -> BackendContext:
+        """Build a BackendContext for the disk-migration backend (steps 6-10)."""
+        return BackendContext(
+            vc=self.vc,
+            px=self.px,
+            config=self.config,
+            dry_run=self.dry_run,
+            log=self.log,
+            resolve_vmid=self._resolve_vmid,
+            resolve_vm_config=self._resolve_vm_config,
+            effective_wait=self._effective_wait,
+            sleep_fn=self._sleep,
+        )
 
     def _build_step_context(self) -> StepContext:
         """Build a StepContext for OS handler steps 11-13."""

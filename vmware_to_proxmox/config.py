@@ -39,6 +39,18 @@ class GuestConfig:
 
 
 @dataclass
+class NetAppShiftConfig:
+    host: str
+    user: str
+    password: str
+    port: int = 443
+    verify_ssl: bool = False
+
+
+VALID_DISK_BACKENDS = ("proxmox-native", "netapp-shift")
+
+
+@dataclass
 class MigrationConfig:
     vm_name: str
     migration_datastore: str
@@ -64,6 +76,7 @@ class MigrationConfig:
     purge_vmware_script: str = r"C:\TMP\pveMigration\purge-vmware-tools.ps1"
     import_nic_script: str = r"C:\TMP\pveMigration\importNicConfig.ps1"
     disk_move_timeout: int = 14400
+    disk_conversion_backend: str = "proxmox-native"
 
 
 _MIGRATION_FIELD_NAMES = {f.name for f in fields(MigrationConfig)}
@@ -75,6 +88,7 @@ class AppConfig:
     proxmox: ProxmoxConfig
     guest: GuestConfig
     migration: MigrationConfig
+    netapp_shift: NetAppShiftConfig | None = None
 
 
 def _resolve_password(cli_value, env_var, yaml_value, prompt_label):
@@ -249,6 +263,46 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
                                          r"C:\TMP\pveMigration\importNicConfig.ps1"))
     disk_move_timeout = int(_pick(args.disk_move_timeout,
                                   mig_yaml.get("disk_move_timeout"), 14400))
+    disk_conversion_backend = _pick(
+        args.disk_conversion_backend,
+        mig_yaml.get("disk_conversion_backend"),
+        "proxmox-native",
+    )
+    if disk_conversion_backend not in VALID_DISK_BACKENDS:
+        raise ConfigurationError(
+            f"disk_conversion_backend must be one of {VALID_DISK_BACKENDS}, "
+            f"got: {disk_conversion_backend!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # NetApp Shift (only required when backend is "netapp-shift")
+    # ------------------------------------------------------------------
+    shift_yaml = yaml_data.get("netapp_shift", {}) or {}
+    shift_host = args.netapp_shift_host or shift_yaml.get("host", "")
+    shift_user = args.netapp_shift_user or shift_yaml.get("user", "")
+    shift_port = int(_pick(args.netapp_shift_port, shift_yaml.get("port"), 443))
+    shift_verify_ssl = bool(_pick(
+        args.netapp_shift_verify_ssl, shift_yaml.get("verify_ssl"), False
+    ))
+
+    netapp_shift_config: NetAppShiftConfig | None = None
+    if disk_conversion_backend == "netapp-shift":
+        if not shift_host or not shift_user:
+            raise ConfigurationError(
+                "NetApp Shift host and user are required when "
+                "disk_conversion_backend is 'netapp-shift'"
+            )
+        shift_password = _resolve_password(
+            args.netapp_shift_password, "NETAPP_SHIFT_PASSWORD",
+            shift_yaml.get("password"), "NetApp Shift password",
+        )
+        netapp_shift_config = NetAppShiftConfig(
+            host=shift_host,
+            user=shift_user,
+            password=shift_password,
+            port=shift_port,
+            verify_ssl=shift_verify_ssl,
+        )
 
     # ------------------------------------------------------------------
     # Build per-VM configs
@@ -299,6 +353,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         purge_vmware_script=purge_vmware_script,
         import_nic_script=import_nic_script,
         disk_move_timeout=disk_move_timeout,
+        disk_conversion_backend=disk_conversion_backend,
     )
 
     app_configs: list[AppConfig] = []
@@ -331,6 +386,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
             proxmox=proxmox_config,
             guest=vm_guest,
             migration=vm_migration,
+            netapp_shift=netapp_shift_config,
         ))
 
     # ------------------------------------------------------------------
