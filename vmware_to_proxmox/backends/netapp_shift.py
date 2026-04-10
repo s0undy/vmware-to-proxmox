@@ -29,6 +29,11 @@ class NetAppShiftBackend(DiskMigrationBackend):
         self._resource_group_id: str | None = None
         self._blueprint_id: str | None = None
         self._execution_id: str | None = None
+        self._vm_id: str | None = None
+        self._source_site_id: str | None = None
+        self._source_virt_env_id: str | None = None
+        self._dest_site_id: str | None = None
+        self._dest_virt_env_id: str | None = None
 
     def prepare(self, ctx: BackendContext) -> None:
         ctx.log.info("Initializing NetApp Shift backend ...")
@@ -80,20 +85,22 @@ class NetAppShiftBackend(DiskMigrationBackend):
             self._resource_group_id = existing
             return
 
-        source_site_id = self.client.get_site_id_by_name(cfg.netapp_source_site)
-        source_virt_env_id = self.client.get_virt_env_id(source_site_id)
-        dest_site_id = self.client.get_site_id_by_name(cfg.netapp_destination_site)
-        dest_virt_env_id = self.client.get_virt_env_id(dest_site_id)
-        vm_id = self.client.get_vm_id_by_name(source_site_id, source_virt_env_id, vm.name)
+        self._source_site_id = self.client.get_site_id_by_name(cfg.netapp_source_site)
+        self._source_virt_env_id = self.client.get_virt_env_id(self._source_site_id)
+        self._dest_site_id = self.client.get_site_id_by_name(cfg.netapp_destination_site)
+        self._dest_virt_env_id = self.client.get_virt_env_id(self._dest_site_id)
+        self._vm_id = self.client.get_vm_id_by_name(
+            self._source_site_id, self._source_virt_env_id, vm.name,
+        )
 
         ctx.log.info("  Creating resource group %s ...", rg_name)
         self._resource_group_id = self.client.create_resource_group(
             name=rg_name,
-            source_site_id=source_site_id,
-            source_virt_env_id=source_virt_env_id,
-            dest_site_id=dest_site_id,
-            dest_virt_env_id=dest_virt_env_id,
-            vm_id=vm_id,
+            source_site_id=self._source_site_id,
+            source_virt_env_id=self._source_virt_env_id,
+            dest_site_id=self._dest_site_id,
+            dest_virt_env_id=self._dest_virt_env_id,
+            vm_id=self._vm_id,
             vm_name=vm.name,
             datastore_name=cfg.proxmox_final_storage,
             volume_name=cfg.netapp_destination_volume,
@@ -135,21 +142,35 @@ class NetAppShiftBackend(DiskMigrationBackend):
                     "(re-run from step 7)."
                 )
 
-        source_site_id = self.client.get_site_id_by_name(cfg.netapp_source_site)
-        source_virt_env_id = self.client.get_virt_env_id(source_site_id)
-        dest_site_id = self.client.get_site_id_by_name(cfg.netapp_destination_site)
-        dest_virt_env_id = self.client.get_virt_env_id(dest_site_id)
-        vm_id = self.client.get_vm_id_by_name(source_site_id, source_virt_env_id, vm.name)
+        if self._source_site_id is None:
+            self._source_site_id = self.client.get_site_id_by_name(cfg.netapp_source_site)
+        if self._source_virt_env_id is None:
+            self._source_virt_env_id = self.client.get_virt_env_id(self._source_site_id)
+        if self._dest_site_id is None:
+            self._dest_site_id = self.client.get_site_id_by_name(cfg.netapp_destination_site)
+        if self._dest_virt_env_id is None:
+            self._dest_virt_env_id = self.client.get_virt_env_id(self._dest_site_id)
+
+        # The VM is no longer in the unprotected list once step 7 has placed
+        # it in a resource group, so on resume we read the VM id back from
+        # the existing resource group instead of /api/setup/vm/unprotected.
+        if self._vm_id is None:
+            self._vm_id = self.client.get_resource_group_vm_id(rg_name)
+            if self._vm_id is None:
+                raise MigrationError(
+                    f"Cannot create blueprint: VM {vm.name} not found in "
+                    f"resource group {rg_name}."
+                )
 
         ctx.log.info("  Creating blueprint %s ...", bp_name)
         self._blueprint_id = self.client.create_blueprint(
             name=bp_name,
-            source_site_id=source_site_id,
-            source_virt_env_id=source_virt_env_id,
-            dest_site_id=dest_site_id,
-            dest_virt_env_id=dest_virt_env_id,
+            source_site_id=self._source_site_id,
+            source_virt_env_id=self._source_virt_env_id,
+            dest_site_id=self._dest_site_id,
+            dest_virt_env_id=self._dest_virt_env_id,
             resource_group_id=self._resource_group_id,
-            vm_id=vm_id,
+            vm_id=self._vm_id,
             vm_name=vm.name,
         )
         ctx.log.info("  Blueprint created (id=%s).", self._blueprint_id)

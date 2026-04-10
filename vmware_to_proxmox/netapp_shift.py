@@ -298,11 +298,25 @@ class NetAppShiftClient:
             )
         return bp_id
 
-    def get_resource_group_id_by_name(self, name: str) -> str | None:
+    def get_resource_group_by_name(self, name: str) -> dict | None:
         payload = self._request("GET", SETUP_PORT, "/api/setup/protectionGroup")
         for rg in payload.get("list", []) or []:
             if rg.get("name") == name:
-                return rg.get("_id")
+                return rg
+        return None
+
+    def get_resource_group_id_by_name(self, name: str) -> str | None:
+        rg = self.get_resource_group_by_name(name)
+        return rg.get("_id") if rg else None
+
+    def get_resource_group_vm_id(self, name: str) -> str | None:
+        """Return the first VM id stored on a resource group, for resume."""
+        rg = self.get_resource_group_by_name(name)
+        if not rg:
+            return None
+        vms = rg.get("vms") or []
+        if vms and isinstance(vms[0], dict):
+            return vms[0].get("_id")
         return None
 
     def get_blueprint_id_by_name(self, name: str) -> str | None:
