@@ -270,22 +270,22 @@ class NetAppShiftClient:
             "protectionGroups": [{"_id": resource_group_id}],
             "bootOrder": {
                 "protectionGroups": [
-                    {"protectionGroup": {"_id": resource_group_id}, "order": 0},
+                    {"protectionGroup": {"_id": resource_group_id}, "order": 3},
                 ],
                 "vms": [
-                    {"vm": {"_id": vm_id}, "order": 0},
+                    {"vm": {"_id": vm_id}, "order": 3},
                 ],
             },
             "vmSettings": [
                 {
                     "vm": {"_id": vm_id},
                     "name": vm_name,
-                    "order": 0,
+                    "order": 3,
                     "powerOnFlag": True,
                 }
             ],
             "mappings": [],
-            "ipConfig": {"type": "retain", "targetNetworks": []},
+            "ipConfig": {"type": "do_not_config", "targetNetworks": []},
             "serviceAccounts": [],
         }
         payload = self._request(
