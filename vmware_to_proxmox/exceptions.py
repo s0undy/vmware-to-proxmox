@@ -31,3 +31,11 @@ class ProxmoxOperationError(MigrationError):
 
 class ConfigurationError(MigrationError):
     """Invalid or missing configuration."""
+
+
+class NetAppShiftError(MigrationError):
+    """A NetApp Shift REST API operation failed."""
+
+
+class NetAppShiftConnectionError(NetAppShiftError):
+    """Cannot connect to or authenticate against NetApp Shift."""

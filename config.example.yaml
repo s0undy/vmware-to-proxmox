@@ -80,6 +80,13 @@ migration:
   virtio_iso_storage: "local"                                                  # --virtio-iso-storage
   virtio_iso_filename: "virtio-win-0.1.271-1.iso"                             # --virtio-iso-filename
 
+  # Disk-migration backend (owns steps 6-10).
+  #   proxmox-native = default; uses Proxmox API + SSH to rewrite descriptors
+  #                    and move/convert disks with qemu-img.
+  #   netapp-shift   = delegate to NetApp Shift via REST API (requires the
+  #                    netapp_shift: block below to be configured).
+  disk_conversion_backend: "proxmox-native"                                    # --disk-conversion-backend
+
   # ---------------------------------------------------------------------------
   # VM list — specify one or more VMs to migrate.
   #
@@ -113,6 +120,17 @@ migration:
     #   enable_ha: true              # override HA for this VM
     #   guest_user: "OtherAdmin"     # override guest credentials for this VM
     #   guest_password: ""
+
+# ---------------------------------------------------------------------------
+# NetApp Shift connection (only required when
+# migration.disk_conversion_backend is "netapp-shift")
+# ---------------------------------------------------------------------------
+# netapp_shift:
+#   host: "shift.example.com"        # --netapp-shift-host
+#   user: "admin"                    # --netapp-shift-user
+#   password: ""                     # --netapp-shift-password  (or NETAPP_SHIFT_PASSWORD env var)
+#   port: 443                        # --netapp-shift-port
+#   verify_ssl: false                # --netapp-shift-verify-ssl
 
 # ---------------------------------------------------------------------------
 # Workflow control
