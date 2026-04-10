@@ -104,6 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="NetApp Shift API port (default: 443)")
     parser.add_argument("--netapp-shift-verify-ssl", action="store_true", default=None,
                         help="Verify SSL certificate for NetApp Shift")
+    parser.add_argument("--netapp-source-site",
+                        help="Source site name registered in NetApp Shift")
+    parser.add_argument("--netapp-destination-site",
+                        help="Destination site name registered in NetApp Shift")
+    parser.add_argument("--netapp-destination-qtree",
+                        help="Destination QTree name for converted disks")
 
     # Proxmox VM options
     parser.add_argument("--proxmox-vmid", type=int, default=None,
