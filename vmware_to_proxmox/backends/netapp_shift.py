@@ -65,8 +65,9 @@ class NetAppShiftBackend(DiskMigrationBackend):
         if ctx.dry_run:
             ctx.log.info(
                 "  DRY RUN: would create resource group %s for VM %s "
-                "(datastore=%s, qtree=%s)",
-                rg_name, vm.name, cfg.proxmox_final_storage, cfg.netapp_destination_qtree,
+                "(datastore=%s, volume=%s, qtree=%s)",
+                rg_name, vm.name, cfg.proxmox_final_storage,
+                cfg.netapp_destination_volume, cfg.netapp_destination_qtree,
             )
             return
 
@@ -95,6 +96,7 @@ class NetAppShiftBackend(DiskMigrationBackend):
             vm_id=vm_id,
             vm_name=vm.name,
             datastore_name=cfg.proxmox_final_storage,
+            volume_name=cfg.netapp_destination_volume,
             qtree_name=cfg.netapp_destination_qtree,
         )
         ctx.log.info("  Resource group created (id=%s).", self._resource_group_id)

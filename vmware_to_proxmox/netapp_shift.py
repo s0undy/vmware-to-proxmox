@@ -203,6 +203,7 @@ class NetAppShiftClient:
         vm_id: str,
         vm_name: str,
         datastore_name: str,
+        volume_name: str,
         qtree_name: str,
         boot_order: int = 3,
     ) -> str:
@@ -226,7 +227,7 @@ class NetAppShiftClient:
                         "vm": {"_id": vm_id},
                         "datastoreName": datastore_name,
                         "qtreeName": qtree_name,
-                        "volumeName": qtree_name,
+                        "volumeName": volume_name,
                     }
                 ],
                 "snapshotType": "clone_based_migration",

@@ -79,6 +79,7 @@ class MigrationConfig:
     disk_conversion_backend: str = "proxmox-native"
     netapp_source_site: str = ""
     netapp_destination_site: str = ""
+    netapp_destination_volume: str = ""
     netapp_destination_qtree: str = ""
 
 
@@ -283,6 +284,9 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     netapp_destination_site = _pick(
         args.netapp_destination_site, mig_yaml.get("netapp_destination_site"), "",
     )
+    netapp_destination_volume = _pick(
+        args.netapp_destination_volume, mig_yaml.get("netapp_destination_volume"), "",
+    )
     netapp_destination_qtree = _pick(
         args.netapp_destination_qtree, mig_yaml.get("netapp_destination_qtree"), "",
     )
@@ -369,6 +373,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         disk_conversion_backend=disk_conversion_backend,
         netapp_source_site=netapp_source_site,
         netapp_destination_site=netapp_destination_site,
+        netapp_destination_volume=netapp_destination_volume,
         netapp_destination_qtree=netapp_destination_qtree,
     )
 
@@ -393,6 +398,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
                 field for field, value in (
                     ("netapp_source_site", vm_migration.netapp_source_site),
                     ("netapp_destination_site", vm_migration.netapp_destination_site),
+                    ("netapp_destination_volume", vm_migration.netapp_destination_volume),
                     ("netapp_destination_qtree", vm_migration.netapp_destination_qtree),
                     ("proxmox_final_storage", vm_migration.proxmox_final_storage),
                 )

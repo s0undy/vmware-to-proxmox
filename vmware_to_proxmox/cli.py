@@ -108,6 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Source site name registered in NetApp Shift")
     parser.add_argument("--netapp-destination-site",
                         help="Destination site name registered in NetApp Shift")
+    parser.add_argument("--netapp-destination-volume",
+                        help="Destination NetApp volume backing the qtree")
     parser.add_argument("--netapp-destination-qtree",
                         help="Destination QTree name for converted disks")
 
