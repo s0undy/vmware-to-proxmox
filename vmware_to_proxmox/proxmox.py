@@ -3,6 +3,7 @@
 import logging
 import math
 import re
+import shlex
 import time
 
 import paramiko
@@ -121,6 +122,14 @@ class ProxmoxClient:
         bios = "ovmf" if vm_config["firmware"] == "efi" else "seabios"
         ostype = GUEST_ID_TO_OSTYPE.get(guest_id, "other")
 
+        # NetApp Shift converts the disks outside Proxmox and imports the
+        # finished qcow2 images in a later step, so the VM shell must be
+        # created without any data disks (and without a scsi0 boot hint —
+        # there is no scsi0 yet).
+        skip_data_disks = (
+            migration_config.disk_conversion_backend == "netapp-shift"
+        )
+
         params = {
             "vmid": vmid,
             "name": vm_config["name"],
@@ -132,20 +141,27 @@ class ProxmoxClient:
             "bios": bios,
             "ostype": ostype,
             "scsihw": "virtio-scsi-single",
-            "boot": "order=scsi0",
             "agent": "1",
             "numa": 1,
             "tablet": 1,
             "ide2": "none,media=cdrom",
         }
+        if not skip_data_disks:
+            params["boot"] = "order=scsi0"
 
         # Disks — preserve order from vCenter
-        for i, disk in enumerate(vm_config["disks"]):
-            size_gb = int(disk["size_gb"])
-            if size_gb <= 0:
-                logger.warning("  Disk scsi%d: reported size is %s GB — defaulting to 1 GB", i, disk["size_gb"])
-                size_gb = 1
-            params[f"scsi{i}"] = f"{storage}:{size_gb},format=vmdk,ssd=1,discard=on,iothread=1"
+        if skip_data_disks:
+            logger.info(
+                "  Skipping data-disk creation (disk_conversion_backend=netapp-shift); "
+                "disks will be imported after conversion.",
+            )
+        else:
+            for i, disk in enumerate(vm_config["disks"]):
+                size_gb = int(disk["size_gb"])
+                if size_gb <= 0:
+                    logger.warning("  Disk scsi%d: reported size is %s GB — defaulting to 1 GB", i, disk["size_gb"])
+                    size_gb = 1
+                params[f"scsi{i}"] = f"{storage}:{size_gb},format=vmdk,ssd=1,discard=on,iothread=1"
 
         # NICs — preserve order, use ordered bridge list
         bridges = [b.strip() for b in migration_config.proxmox_bridges.split(",")]
@@ -158,8 +174,10 @@ class ProxmoxClient:
             else:
                 params[f"net{i}"] = f"virtio,bridge={bridge},link_down=1"
 
-        # EFI disk when using OVMF
-        if bios == "ovmf":
+        # EFI disk when using OVMF. For netapp-shift we defer efidisk0
+        # creation until after the converted disks are imported, so that
+        # it ends up last in the disk numbering.
+        if bios == "ovmf" and not skip_data_disks:
             params["efidisk0"] = f"{storage}:1,format=qcow2,efitype=4m,pre-enrolled-keys=1"
 
         try:
@@ -227,6 +245,131 @@ class ProxmoxClient:
             ) from exc
         self.wait_for_task(upid, timeout=timeout)
         logger.info("    %s move complete.", disk)
+
+    def import_disks_from_netapp_shift(
+        self,
+        *,
+        vmid: int,
+        vm_name: str,
+        num_disks: int,
+        firmware: str,
+        final_storage: str,
+        netapp_volume: str,
+        netapp_qtree: str,
+    ) -> None:
+        """Move NetApp Shift output qcow2 files into the Proxmox images
+        directory for ``vmid`` and attach them to the VM.
+
+        Source layout produced by NetApp Shift::
+
+            /mnt/pve/{netapp_volume}/{netapp_qtree}/{netapp_qtree}/{vm_name}/
+                {vm_name}.qcow2           # first disk
+                {vm_name}_1.qcow2         # second disk
+                {vm_name}_2.qcow2         # third disk
+                ...
+
+        Destination (Proxmox dir storage layout)::
+
+            /mnt/pve/{netapp_volume}/images/{vmid}/
+                vm-{vmid}-disk-0.qcow2
+                vm-{vmid}-disk-1.qcow2
+                ...
+
+        The destination directory is created ``drwxr----- nobody:nogroup``
+        and each moved file is set to ``-rw-r----- nobody:nogroup``.
+        After moving, each disk is attached as ``scsiN`` on the VM and
+        the boot order is set to ``order=scsi0``. For OVMF VMs, an
+        ``efidisk0`` is allocated last so it lands after the data disks
+        numerically.
+        """
+        node = self.config.node
+        source_dir = (
+            f"/mnt/pve/{netapp_volume}/{netapp_qtree}/"
+            f"{netapp_qtree}/{vm_name}"
+        )
+        dest_dir = f"/mnt/pve/{netapp_volume}/images/{vmid}"
+
+        # 1. Destination directory with drwxr----- nobody:nogroup.
+        logger.info("  Preparing destination directory %s", dest_dir)
+        self._ssh_run(f"mkdir -p {shlex.quote(dest_dir)}")
+        self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_dir)}")
+        self._ssh_run(f"chmod 0740 {shlex.quote(dest_dir)}")
+
+        # 2. Move + rename each disk (idempotent).
+        for i in range(num_disks):
+            src_name = f"{vm_name}.qcow2" if i == 0 else f"{vm_name}_{i}.qcow2"
+            dest_name = f"vm-{vmid}-disk-{i}.qcow2"
+            src_path = f"{source_dir}/{src_name}"
+            dest_path = f"{dest_dir}/{dest_name}"
+
+            _, _, src_rc = self._ssh_run(
+                f"test -f {shlex.quote(src_path)}", check=False,
+            )
+            _, _, dest_rc = self._ssh_run(
+                f"test -f {shlex.quote(dest_path)}", check=False,
+            )
+
+            if dest_rc == 0 and src_rc != 0:
+                logger.info(
+                    "    [%d/%d] %s already in place — skipping move.",
+                    i + 1, num_disks, dest_name,
+                )
+            elif src_rc == 0 and dest_rc != 0:
+                logger.info(
+                    "    [%d/%d] Moving %s -> %s ...",
+                    i + 1, num_disks, src_name, dest_name,
+                )
+                self._ssh_run(
+                    f"mv {shlex.quote(src_path)} {shlex.quote(dest_path)}"
+                )
+            elif src_rc == 0 and dest_rc == 0:
+                raise ProxmoxOperationError(
+                    f"Both source and destination exist for disk {i}: "
+                    f"{src_path} and {dest_path}. Refusing to overwrite."
+                )
+            else:
+                raise ProxmoxOperationError(
+                    f"Converted disk not found for disk index {i}: {src_path}"
+                )
+
+            # Always re-apply ownership/permissions (cheap + idempotent).
+            self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_path)}")
+            self._ssh_run(f"chmod 0640 {shlex.quote(dest_path)}")
+
+        # 3. Attach qcow2 disks to the VM and set boot order.
+        config_params: dict = {}
+        for i in range(num_disks):
+            config_params[f"scsi{i}"] = (
+                f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
+                "ssd=1,discard=on,iothread=1"
+            )
+        config_params["boot"] = "order=scsi0"
+
+        logger.info("  Attaching %d disk(s) to VMID %d ...", num_disks, vmid)
+        try:
+            self.api.nodes(node).qemu(vmid).config.post(**config_params)
+        except Exception as exc:
+            raise ProxmoxOperationError(
+                f"Failed to attach imported disks to VM {vmid}: {exc}"
+            ) from exc
+
+        # 4. Allocate efidisk0 last for OVMF, so it gets the highest
+        #    disk-N number in the images directory.
+        if firmware == "efi":
+            logger.info("  Allocating efidisk0 on %s ...", final_storage)
+            try:
+                self.api.nodes(node).qemu(vmid).config.post(
+                    efidisk0=(
+                        f"{final_storage}:1,format=qcow2,"
+                        "efitype=4m,pre-enrolled-keys=1"
+                    ),
+                )
+            except Exception as exc:
+                raise ProxmoxOperationError(
+                    f"Failed to allocate efidisk0 for VM {vmid}: {exc}"
+                ) from exc
+
+        logger.info("  Disk import complete for VMID %d.", vmid)
 
     def reboot_vm(self, vmid: int) -> None:
         """Reboot a Proxmox VM via ACPI signal."""
@@ -459,6 +602,27 @@ class ProxmoxClient:
                 f"SSH connection to {self.config.host} failed: {exc}"
             ) from exc
         return self._ssh
+
+    def _ssh_run(
+        self, command: str, *, check: bool = True,
+    ) -> tuple[str, str, int]:
+        """Run a shell command on the Proxmox node.
+
+        Returns ``(stdout, stderr, exit_code)``. Raises
+        :class:`ProxmoxOperationError` when ``check`` is True and the
+        command exits non-zero.
+        """
+        ssh = self._get_ssh()
+        _, stdout, stderr = ssh.exec_command(command)
+        exit_code = stdout.channel.recv_exit_status()
+        out = stdout.read().decode(errors="replace")
+        err = stderr.read().decode(errors="replace")
+        if check and exit_code != 0:
+            raise ProxmoxOperationError(
+                f"SSH command failed (exit {exit_code}) on {self.config.host}: "
+                f"{command}\nstdout: {out}\nstderr: {err}"
+            )
+        return out, err, exit_code
 
     def _ssh_read_file(self, path: str) -> str:
         """Read a text file from the Proxmox node via SFTP."""

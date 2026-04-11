@@ -115,7 +115,7 @@ class ProxmoxNativeBackend(DiskMigrationBackend):
             ctx.sleep_fn(VM_START_SETTLE_SECONDS)
             ctx.log.info("  Ready to proceed.")
 
-    def step_10_verify(self, ctx: BackendContext, vm) -> None:
+    def step_11_verify(self, ctx: BackendContext, vm) -> None:
         from ..migration import VM_FULL_BOOT_SECONDS
 
         vmid = ctx.resolve_vmid()

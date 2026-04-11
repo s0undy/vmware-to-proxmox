@@ -21,8 +21,8 @@ class UbuntuHandler(OSHandler):
 
     def step_3_export_nic_config(self, vm, guest_ops, config, dry_run):
         # Netplan configs already live on disk — no export needed.
-        # Step 13 will replace interface names in the existing netplan files.
-        logger.info("  Skipped — netplan config already on disk, will update interface names in step 13.")
+        # Step 14 will replace interface names in the existing netplan files.
+        logger.info("  Skipped — netplan config already on disk, will update interface names in step 14.")
 
     def step_4_enable_boot_driver(self, vm, guest_ops, config, dry_run):
         # VirtIO SCSI is included in the default Ubuntu initramfs — nothing to do.
@@ -48,14 +48,14 @@ class UbuntuHandler(OSHandler):
         logger.info("  qemu-guest-agent installed and enabled.")
 
     # ------------------------------------------------------------------
-    # Steps 11-13: run via QEMU guest agent after VM is on Proxmox
+    # Steps 12-14: run via QEMU guest agent after VM is on Proxmox
     # ------------------------------------------------------------------
 
-    def step_11_install_virtio_drivers(self, ctx: StepContext):
+    def step_12_install_virtio_drivers(self, ctx: StepContext):
         # VirtIO drivers are built into the Linux kernel — nothing to install.
         ctx.log.info("  Skipped — VirtIO drivers are built into the Linux kernel.")
 
-    def step_12_purge_vmware_tools(self, ctx: StepContext):
+    def step_13_purge_vmware_tools(self, ctx: StepContext):
         from ..migration import PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS
 
         if ctx.dry_run:
@@ -88,7 +88,7 @@ class UbuntuHandler(OSHandler):
 
         self._reboot_and_wait(ctx, PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS)
 
-    def step_13_restore_nic_config(self, ctx: StepContext):
+    def step_14_restore_nic_config(self, ctx: StepContext):
         from ..migration import NIC_RESTORE_PRE_REBOOT_SECONDS, POST_REBOOT_BOOT_SECONDS
 
         if ctx.dry_run:

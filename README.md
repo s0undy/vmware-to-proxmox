@@ -15,11 +15,12 @@ Implements the [Attach Disk & Move Disk (minimal downtime)](https://pve.proxmox.
 7. Rewrite VMDK descriptors on the Proxmox node
 8. Start VM in Proxmox
 9. Move disks to final storage (VMDK to qcow2)
-10. Verify VM is running on final storage
-11. Install VirtIO drivers from ISO via QEMU guest agent
-12. Purge VMware Tools
-13. Restore NIC configuration
-14. Enable NICs and final reboot
+10. Import converted disks (NetApp Shift backend only)
+11. Verify VM is running on final storage
+12. Install VirtIO drivers from ISO via QEMU guest agent
+13. Purge VMware Tools
+14. Restore NIC configuration
+15. Enable NICs and final reboot
 
 ## Requirements
 
@@ -28,7 +29,7 @@ Implements the [Attach Disk & Move Disk (minimal downtime)](https://pve.proxmox.
 - VirtIO drivers and guest tools staged in the guest (`C:\TMP\pveMigration\`)
 - PowerShell scripts (`exportNicConfig.ps1`, `enable-vioscsi-to-load-on-boot.ps1`, `importNicConfig.ps1`, `purge-vmware-tools.ps1`) in the same directory
 - VirtIO ISO uploaded to Proxmox storage (default: `local`)
-- QEMU guest agent installed in the guest (steps 11-14)
+- QEMU guest agent installed in the guest (steps 12-15)
 
 ## Install
 
@@ -52,7 +53,7 @@ All settings in `config.yaml` can be overridden with CLI flags. Run `python migr
 | Flag | Purpose |
 |---|---|
 | `--dry-run` | Log actions without making changes |
-| `--skip-to N` | Resume from step N (1-14) |
+| `--skip-to N` | Resume from step N (1-15) |
 | `--parallel` | Migrate all VMs concurrently |
 | `--cpu-type TYPE` | Proxmox CPU type (default: `host`) |
 | `--cpu-flags FLAGS` | Extra CPU flags (e.g. `+aes,-vmx`) |
@@ -62,9 +63,9 @@ All settings in `config.yaml` can be overridden with CLI flags. Run `python migr
 
 ### NIC boot mode
 
-By default, NICs are created with `link_down=1` and enabled in step 14. This prevents domain authentication issues during driver installation.
+By default, NICs are created with `link_down=1` and enabled in step 15. This prevents domain authentication issues during driver installation.
 
-Set `enable_nics_on_boot: true` (or `--enable-nics-on-boot`) to create NICs with link enabled from the start. This halves all boot wait timers in steps 8-14, significantly reducing total migration time for domain-joined servers that would otherwise wait for domain controller timeouts.
+Set `enable_nics_on_boot: true` (or `--enable-nics-on-boot`) to create NICs with link enabled from the start. This halves all boot wait timers in steps 8-15, significantly reducing total migration time for domain-joined servers that would otherwise wait for domain controller timeouts.
 
 ## Multiple VMs
 

@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--disk-conversion-backend",
                         choices=["proxmox-native", "netapp-shift"],
                         default=None,
-                        help="Backend that owns steps 6-10 (default: proxmox-native)")
+                        help="Backend that owns steps 6-11 (default: proxmox-native)")
     parser.add_argument("--start-vm-before-move", action="store_true", default=None,
                         help="Start VM before moving disks (default: true)")
     parser.add_argument("--no-start-vm-before-move", dest="start_vm_before_move",
@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "halves wait timers)")
     parser.add_argument("--no-enable-nics-on-boot", dest="enable_nics_on_boot",
                         action="store_false",
-                        help="Create NICs with link disabled (default, enables in step 14)")
+                        help="Create NICs with link disabled (default, enables in step 15)")
     parser.add_argument("--enable-ha", action="store_true", default=None,
                         help="Add VM to Proxmox HA after migration completes (default: false)")
     parser.add_argument("--no-enable-ha", dest="enable_ha", action="store_false",
@@ -104,6 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="NetApp Shift API port (default: 443)")
     parser.add_argument("--netapp-shift-verify-ssl", action="store_true", default=None,
                         help="Verify SSL certificate for NetApp Shift")
+    parser.add_argument("--netapp-source-site",
+                        help="Source site name registered in NetApp Shift")
+    parser.add_argument("--netapp-destination-site",
+                        help="Destination site name registered in NetApp Shift")
+    parser.add_argument("--netapp-destination-volume",
+                        help="Destination NetApp volume backing the qtree")
+    parser.add_argument("--netapp-destination-qtree",
+                        help="Destination QTree name for converted disks")
 
     # Proxmox VM options
     parser.add_argument("--proxmox-vmid", type=int, default=None,
@@ -148,8 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Workflow control
     parser.add_argument(
-        "--skip-to", type=int, default=None, choices=range(1, 15),
-        help="Resume from step N (1-14, default: 1)",
+        "--skip-to", type=int, default=None, choices=range(1, 16),
+        help="Resume from step N (1-15, default: 1)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", default=None,

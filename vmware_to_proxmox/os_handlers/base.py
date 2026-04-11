@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StepContext:
-    """Bundles all arguments needed by OS handler steps 11-13."""
+    """Bundles all arguments needed by OS handler steps 12-14."""
     vmid: int
     px: object  # ProxmoxClient (avoid circular import)
     config: object  # AppConfig
@@ -50,22 +50,22 @@ class OSHandler(ABC):
         ...
 
     @abstractmethod
-    def step_11_install_virtio_drivers(self, ctx: "StepContext") -> None:
+    def step_12_install_virtio_drivers(self, ctx: "StepContext") -> None:
         """Install VirtIO drivers from ISO after VM is running on Proxmox."""
         ...
 
     @abstractmethod
-    def step_12_purge_vmware_tools(self, ctx: "StepContext") -> None:
+    def step_13_purge_vmware_tools(self, ctx: "StepContext") -> None:
         """Remove VMware Tools from the guest."""
         ...
 
     @abstractmethod
-    def step_13_restore_nic_config(self, ctx: "StepContext") -> None:
+    def step_14_restore_nic_config(self, ctx: "StepContext") -> None:
         """Restore NIC configuration in the guest."""
         ...
 
     # ------------------------------------------------------------------
-    # Shared helpers for steps 11-13
+    # Shared helpers for steps 12-14
     # ------------------------------------------------------------------
 
     def _wait_and_connect_agent(self, ctx: "StepContext") -> None:

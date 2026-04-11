@@ -22,11 +22,11 @@ class OtherHandler(OSHandler):
     def step_5_install_virtio_tools(self, vm, guest_ops, config, dry_run):
         logger.info("  Skipped — OS type is 'other'.")
 
-    def step_11_install_virtio_drivers(self, ctx: StepContext):
+    def step_12_install_virtio_drivers(self, ctx: StepContext):
         ctx.log.info("  Skipped — OS type is 'other'.")
 
-    def step_12_purge_vmware_tools(self, ctx: StepContext):
+    def step_13_purge_vmware_tools(self, ctx: StepContext):
         ctx.log.info("  Skipped — OS type is 'other'.")
 
-    def step_13_restore_nic_config(self, ctx: StepContext):
+    def step_14_restore_nic_config(self, ctx: StepContext):
         ctx.log.info("  Skipped — OS type is 'other'.")

@@ -76,16 +76,24 @@ migration:
   purge_vmware_script: "C:\\TMP\\pveMigration\\purge-vmware-tools.ps1"        # --purge-vmware-script
   import_nic_script: "C:\\TMP\\pveMigration\\importNicConfig.ps1"             # --import-nic-script
 
-  # VirtIO ISO settings (for step 11 — install VirtIO drivers from mounted ISO):
+  # VirtIO ISO settings (for step 12 — install VirtIO drivers from mounted ISO):
   virtio_iso_storage: "local"                                                  # --virtio-iso-storage
   virtio_iso_filename: "virtio-win-0.1.271-1.iso"                             # --virtio-iso-filename
 
-  # Disk-migration backend (owns steps 6-10).
+  # Disk-migration backend (owns steps 6-11).
   #   proxmox-native = default; uses Proxmox API + SSH to rewrite descriptors
   #                    and move/convert disks with qemu-img.
   #   netapp-shift   = delegate to NetApp Shift via REST API (requires the
   #                    netapp_shift: block below to be configured).
   disk_conversion_backend: "proxmox-native"                                    # --disk-conversion-backend
+
+  # NetApp Shift placement (only required when disk_conversion_backend is
+  # "netapp-shift"). The destination datastore is taken from
+  # proxmox_final_storage above.
+  # netapp_source_site: ""           # --netapp-source-site
+  # netapp_destination_site: ""      # --netapp-destination-site
+  # netapp_destination_volume: ""    # --netapp-destination-volume  (NetApp volume backing the qtree)
+  # netapp_destination_qtree: ""     # --netapp-destination-qtree
 
   # ---------------------------------------------------------------------------
   # VM list — specify one or more VMs to migrate.
@@ -120,6 +128,10 @@ migration:
     #   enable_ha: true              # override HA for this VM
     #   guest_user: "OtherAdmin"     # override guest credentials for this VM
     #   guest_password: ""
+    #   netapp_source_site: ""        # override NetApp Shift source site for this VM
+    #   netapp_destination_site: ""   # override NetApp Shift destination site for this VM
+    #   netapp_destination_volume: "" # override NetApp Shift destination volume for this VM
+    #   netapp_destination_qtree: ""  # override NetApp Shift destination qtree for this VM
 
 # ---------------------------------------------------------------------------
 # NetApp Shift connection (only required when
@@ -135,7 +147,7 @@ migration:
 # ---------------------------------------------------------------------------
 # Workflow control
 # ---------------------------------------------------------------------------
-skip_to: 1                           # --skip-to    (resume from step N, 1-14)
+skip_to: 1                           # --skip-to    (resume from step N, 1-15)
 dry_run: false                       # --dry-run    (log actions without executing)
 parallel: false                      # --parallel   (migrate all VMs concurrently)
 verbose: false                       # --verbose    (enable debug-level logging)

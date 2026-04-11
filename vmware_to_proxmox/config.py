@@ -77,6 +77,10 @@ class MigrationConfig:
     import_nic_script: str = r"C:\TMP\pveMigration\importNicConfig.ps1"
     disk_move_timeout: int = 14400
     disk_conversion_backend: str = "proxmox-native"
+    netapp_source_site: str = ""
+    netapp_destination_site: str = ""
+    netapp_destination_volume: str = ""
+    netapp_destination_qtree: str = ""
 
 
 _MIGRATION_FIELD_NAMES = {f.name for f in fields(MigrationConfig)}
@@ -274,6 +278,19 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
             f"got: {disk_conversion_backend!r}"
         )
 
+    netapp_source_site = _pick(
+        args.netapp_source_site, mig_yaml.get("netapp_source_site"), "",
+    )
+    netapp_destination_site = _pick(
+        args.netapp_destination_site, mig_yaml.get("netapp_destination_site"), "",
+    )
+    netapp_destination_volume = _pick(
+        args.netapp_destination_volume, mig_yaml.get("netapp_destination_volume"), "",
+    )
+    netapp_destination_qtree = _pick(
+        args.netapp_destination_qtree, mig_yaml.get("netapp_destination_qtree"), "",
+    )
+
     # ------------------------------------------------------------------
     # NetApp Shift (only required when backend is "netapp-shift")
     # ------------------------------------------------------------------
@@ -354,6 +371,10 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         import_nic_script=import_nic_script,
         disk_move_timeout=disk_move_timeout,
         disk_conversion_backend=disk_conversion_backend,
+        netapp_source_site=netapp_source_site,
+        netapp_destination_site=netapp_destination_site,
+        netapp_destination_volume=netapp_destination_volume,
+        netapp_destination_qtree=netapp_destination_qtree,
     )
 
     app_configs: list[AppConfig] = []
@@ -371,6 +392,24 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
                 val = bool(val)
             overrides[key] = val
         vm_migration = replace(migration_template, **overrides)
+
+        if vm_migration.disk_conversion_backend == "netapp-shift":
+            missing = [
+                field for field, value in (
+                    ("netapp_source_site", vm_migration.netapp_source_site),
+                    ("netapp_destination_site", vm_migration.netapp_destination_site),
+                    ("netapp_destination_volume", vm_migration.netapp_destination_volume),
+                    ("netapp_destination_qtree", vm_migration.netapp_destination_qtree),
+                    ("proxmox_final_storage", vm_migration.proxmox_final_storage),
+                )
+                if not value
+            ]
+            if missing:
+                raise ConfigurationError(
+                    f"VM {entry['vm_name']!r}: disk_conversion_backend is "
+                    f"'netapp-shift' but the following required field(s) are "
+                    f"missing: {', '.join(missing)}"
+                )
 
         # Guest credentials can be overridden per VM.
         vm_guest_user = entry.get("guest_user") or guest_config.user
