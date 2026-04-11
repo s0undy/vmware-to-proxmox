@@ -173,15 +173,11 @@ class ProxmoxClient:
             else:
                 params[f"net{i}"] = f"virtio,bridge={bridge},link_down=1"
 
-        # EFI disk when using OVMF. For netapp-shift there is no later
-        # move step, so place the NVRAM disk directly on the final storage.
-        if bios == "ovmf":
-            efi_storage = (
-                migration_config.proxmox_final_storage
-                if skip_data_disks and migration_config.proxmox_final_storage
-                else storage
-            )
-            params["efidisk0"] = f"{efi_storage}:1,format=qcow2,efitype=4m,pre-enrolled-keys=1"
+        # EFI disk when using OVMF. For netapp-shift we defer efidisk0
+        # creation until after the converted disks are imported, so that
+        # it ends up last in the disk numbering.
+        if bios == "ovmf" and not skip_data_disks:
+            params["efidisk0"] = f"{storage}:1,format=qcow2,efitype=4m,pre-enrolled-keys=1"
 
         try:
             self.api.nodes(node).qemu.create(**params)
