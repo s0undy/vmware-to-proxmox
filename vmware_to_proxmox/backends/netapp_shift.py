@@ -29,7 +29,7 @@ class NetAppShiftBackend(DiskMigrationBackend):
         self._resource_group_id: str | None = None
         self._blueprint_id: str | None = None
         self._execution_id: str | None = None
-        self._vm_id: str | None = None
+        self._vm_info: dict | None = None
         self._source_site_id: str | None = None
         self._source_virt_env_id: str | None = None
         self._dest_site_id: str | None = None
@@ -89,7 +89,7 @@ class NetAppShiftBackend(DiskMigrationBackend):
         self._source_virt_env_id = self.client.get_virt_env_id(self._source_site_id)
         self._dest_site_id = self.client.get_site_id_by_name(cfg.netapp_destination_site)
         self._dest_virt_env_id = self.client.get_virt_env_id(self._dest_site_id)
-        self._vm_id = self.client.get_vm_id_by_name(
+        self._vm_info = self.client.get_unprotected_vm_by_name(
             self._source_site_id, self._source_virt_env_id, vm.name,
         )
 
@@ -100,7 +100,7 @@ class NetAppShiftBackend(DiskMigrationBackend):
             source_virt_env_id=self._source_virt_env_id,
             dest_site_id=self._dest_site_id,
             dest_virt_env_id=self._dest_virt_env_id,
-            vm_id=self._vm_id,
+            vm_id=self._vm_info["_id"],
             vm_name=vm.name,
             datastore_name=cfg.proxmox_final_storage,
             volume_name=cfg.netapp_destination_volume,
@@ -152,11 +152,11 @@ class NetAppShiftBackend(DiskMigrationBackend):
             self._dest_virt_env_id = self.client.get_virt_env_id(self._dest_site_id)
 
         # The VM is no longer in the unprotected list once step 7 has placed
-        # it in a resource group, so on resume we read the VM id back from
+        # it in a resource group, so on resume we read the VM info back from
         # the existing resource group instead of /api/setup/vm/unprotected.
-        if self._vm_id is None:
-            self._vm_id = self.client.get_resource_group_vm_id(rg_name)
-            if self._vm_id is None:
+        if self._vm_info is None:
+            self._vm_info = self.client.get_resource_group_vm_info(rg_name)
+            if self._vm_info is None:
                 raise MigrationError(
                     f"Cannot create blueprint: VM {vm.name} not found in "
                     f"resource group {rg_name}."
@@ -170,8 +170,7 @@ class NetAppShiftBackend(DiskMigrationBackend):
             dest_site_id=self._dest_site_id,
             dest_virt_env_id=self._dest_virt_env_id,
             resource_group_id=self._resource_group_id,
-            vm_id=self._vm_id,
-            vm_name=vm.name,
+            vm_info=self._vm_info,
         )
         ctx.log.info("  Blueprint created (id=%s).", self._blueprint_id)
 

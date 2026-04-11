@@ -168,7 +168,10 @@ class NetAppShiftClient:
             )
         return envs[0]["_id"]
 
-    def get_vm_id_by_name(self, site_id: str, virt_env_id: str, vm_name: str) -> str:
+    def get_unprotected_vm_by_name(
+        self, site_id: str, virt_env_id: str, vm_name: str,
+    ) -> dict:
+        """Return the full VM dict for an unprotected VM, by name."""
         payload = self._request(
             "GET",
             SETUP_PORT,
@@ -177,16 +180,18 @@ class NetAppShiftClient:
         )
         for vm in payload.get("list", []) or []:
             if vm.get("name") == vm_name:
-                vm_id = vm.get("_id")
-                if not vm_id:
+                if not vm.get("_id"):
                     raise NetAppShiftError(
                         f"NetApp Shift VM '{vm_name}' is missing _id"
                     )
-                return vm_id
+                return vm
         raise NetAppShiftError(
             f"NetApp Shift unprotected VM not found: {vm_name} "
             f"(site={site_id}, virtEnv={virt_env_id})"
         )
+
+    def get_vm_id_by_name(self, site_id: str, virt_env_id: str, vm_name: str) -> str:
+        return self.get_unprotected_vm_by_name(site_id, virt_env_id, vm_name)["_id"]
 
     # ------------------------------------------------------------------
     # Resource group / blueprint creation
@@ -211,12 +216,12 @@ class NetAppShiftClient:
             "name": name,
             "sourceSite": {"_id": source_site_id},
             "sourceVirtEnv": {"_id": source_virt_env_id},
-            "vms": [{"_id": vm_id}],
+            "vms": [{"_id": vm_id, "order": boot_order}],
             "bootOrder": {
                 "vms": [{"vm": {"_id": vm_id}, "order": boot_order}],
             },
             "bootDelay": [
-                {"vm": {"_id": vm_id}, "delaySecs": 30},
+                {"vm": {"_id": vm_id}, "delaySecs": 0},
             ],
             "scripts": [],
             "replicationPlan": {
@@ -224,18 +229,20 @@ class NetAppShiftClient:
                 "targetVirtEnv": {"_id": dest_virt_env_id},
                 "datastoreQtreeMapping": [
                     {
-                        "vm": {"_id": vm_id},
                         "datastoreName": datastore_name,
                         "qtreeName": qtree_name,
                         "volumeName": volume_name,
+                        "volumePath": "",
                     }
                 ],
-                "snapshotType": "clone_based_migration",
+                "targetDatastore": {"_id": datastore_name},
+                "snapshotType": "clone_based_conversion",
                 "frequencyMins": "30",
                 "retryCount": 3,
                 "numSnapshotsToRetain": 2,
             },
-            "migrationMode": "clone_based_migration",
+            "migrationMode": "clone_based_conversion",
+            "singleDatastoreForOpenShift": None,
         }
         payload = self._request(
             "POST", SETUP_PORT, "/api/setup/protectionGroup", json=body,
@@ -256,9 +263,20 @@ class NetAppShiftClient:
         dest_site_id: str,
         dest_virt_env_id: str,
         resource_group_id: str,
-        vm_id: str,
-        vm_name: str,
+        vm_info: dict,
+        boot_order: int = 3,
     ) -> str:
+        vm_id = vm_info.get("_id")
+        if not vm_id:
+            raise NetAppShiftError("create_blueprint: vm_info is missing _id")
+
+        network_details = (
+            vm_info.get("networkDetails")
+            or vm_info.get("networks")
+            or []
+        )
+        network_names = [n.get("name", "") for n in network_details if n.get("name")]
+
         body = {
             "name": name,
             "sourceSite": {"_id": source_site_id},
@@ -270,23 +288,41 @@ class NetAppShiftClient:
             "protectionGroups": [{"_id": resource_group_id}],
             "bootOrder": {
                 "protectionGroups": [
-                    {"protectionGroup": {"_id": resource_group_id}, "order": 3},
+                    {
+                        "protectionGroup": {"_id": resource_group_id},
+                        "order": boot_order,
+                    },
                 ],
-                "vms": [
-                    {"vm": {"_id": vm_id}, "order": 3},
-                ],
+                "vms": [{"vm": {"_id": vm_id}, "order": boot_order}],
             },
             "vmSettings": [
                 {
                     "vm": {"_id": vm_id},
-                    "name": vm_name,
-                    "order": 3,
+                    "name": vm_info.get("name", ""),
+                    "numCPUs": vm_info.get("numCPUs", 0),
+                    "memoryMB": vm_info.get("memoryMB", 0),
+                    "ip": "",
+                    "vmGeneration": vm_info.get("vmGeneration", "1"),
+                    "nicIp": vm_info.get("nicIp", []),
+                    "isSecureBootEnable": bool(
+                        vm_info.get("isSecureBootEnable", False)
+                    ),
+                    "retainMacAddress": False,
+                    "removeVMwareTools": False,
+                    "networkDetails": network_details,
+                    "networkName": network_names,
+                    "order": boot_order,
+                    "ipAllocType": "dynamic",
                     "powerOnFlag": True,
+                    "serviceAccountOverrideFlag": False,
+                    "serviceAccount": {"loginId": "", "password": ""},
                 }
             ],
             "mappings": [],
+            "scheduledDateTime": None,
             "ipConfig": {"type": "do_not_config", "targetNetworks": []},
             "serviceAccounts": [],
+            "overridePrepareVM": True,
         }
         payload = self._request(
             "POST", SETUP_PORT, "/api/setup/drplan", json=body,
@@ -317,6 +353,30 @@ class NetAppShiftClient:
         vms = rg.get("vms") or []
         if vms and isinstance(vms[0], dict):
             return vms[0].get("_id")
+        return None
+
+    def get_resource_group_detail(self, rg_id: str) -> dict:
+        """Return the full resource group object by id."""
+        payload = self._request(
+            "GET", SETUP_PORT, f"/api/setup/protectionGroup/{rg_id}",
+        )
+        return payload.get("protectionGroup") or payload or {}
+
+    def get_resource_group_vm_info(self, rg_name: str) -> dict | None:
+        """Best-effort resume helper: return the first VM dict stored on a RG.
+
+        Note: whether the RG response carries the full per-VM fields
+        (numCPUs, networkDetails, ...) depends on the NetApp Shift backend.
+        If fields are missing, the blueprint payload will be sparse — in that
+        case, re-run from step 7 while the VM is still unprotected.
+        """
+        rg = self.get_resource_group_by_name(rg_name)
+        if not rg or not rg.get("_id"):
+            return None
+        detail = self.get_resource_group_detail(rg["_id"])
+        vms = detail.get("vms") or rg.get("vms") or []
+        if vms and isinstance(vms[0], dict):
+            return vms[0]
         return None
 
     def get_blueprint_id_by_name(self, name: str) -> str | None:
