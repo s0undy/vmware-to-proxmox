@@ -121,6 +121,14 @@ class ProxmoxClient:
         bios = "ovmf" if vm_config["firmware"] == "efi" else "seabios"
         ostype = GUEST_ID_TO_OSTYPE.get(guest_id, "other")
 
+        # NetApp Shift converts the disks outside Proxmox and imports the
+        # finished qcow2 images in a later step, so the VM shell must be
+        # created without any data disks (and without a scsi0 boot hint —
+        # there is no scsi0 yet).
+        skip_data_disks = (
+            migration_config.disk_conversion_backend == "netapp-shift"
+        )
+
         params = {
             "vmid": vmid,
             "name": vm_config["name"],
@@ -132,20 +140,27 @@ class ProxmoxClient:
             "bios": bios,
             "ostype": ostype,
             "scsihw": "virtio-scsi-single",
-            "boot": "order=scsi0",
             "agent": "1",
             "numa": 1,
             "tablet": 1,
             "ide2": "none,media=cdrom",
         }
+        if not skip_data_disks:
+            params["boot"] = "order=scsi0"
 
         # Disks — preserve order from vCenter
-        for i, disk in enumerate(vm_config["disks"]):
-            size_gb = int(disk["size_gb"])
-            if size_gb <= 0:
-                logger.warning("  Disk scsi%d: reported size is %s GB — defaulting to 1 GB", i, disk["size_gb"])
-                size_gb = 1
-            params[f"scsi{i}"] = f"{storage}:{size_gb},format=vmdk,ssd=1,discard=on,iothread=1"
+        if skip_data_disks:
+            logger.info(
+                "  Skipping data-disk creation (disk_conversion_backend=netapp-shift); "
+                "disks will be imported after conversion.",
+            )
+        else:
+            for i, disk in enumerate(vm_config["disks"]):
+                size_gb = int(disk["size_gb"])
+                if size_gb <= 0:
+                    logger.warning("  Disk scsi%d: reported size is %s GB — defaulting to 1 GB", i, disk["size_gb"])
+                    size_gb = 1
+                params[f"scsi{i}"] = f"{storage}:{size_gb},format=vmdk,ssd=1,discard=on,iothread=1"
 
         # NICs — preserve order, use ordered bridge list
         bridges = [b.strip() for b in migration_config.proxmox_bridges.split(",")]
@@ -158,9 +173,15 @@ class ProxmoxClient:
             else:
                 params[f"net{i}"] = f"virtio,bridge={bridge},link_down=1"
 
-        # EFI disk when using OVMF
+        # EFI disk when using OVMF. For netapp-shift there is no later
+        # move step, so place the NVRAM disk directly on the final storage.
         if bios == "ovmf":
-            params["efidisk0"] = f"{storage}:1,format=qcow2,efitype=4m,pre-enrolled-keys=1"
+            efi_storage = (
+                migration_config.proxmox_final_storage
+                if skip_data_disks and migration_config.proxmox_final_storage
+                else storage
+            )
+            params["efidisk0"] = f"{efi_storage}:1,format=qcow2,efitype=4m,pre-enrolled-keys=1"
 
         try:
             self.api.nodes(node).qemu.create(**params)
