@@ -391,10 +391,10 @@ class NetAppShiftClient:
     # ------------------------------------------------------------------
     #
     # NetApp Shift execution step status codes (observed):
-    #   1 = pending, 2 = running, 4 = success.
-    # Anything else (3, 5, ...) is treated as a failure. An `error` field
-    # on a step is also treated as failure regardless of status code.
-    STEP_STATUS_SUCCESS = 4
+    #   0/1 = pending/queued, 2 = running, 3 = skipped / not-applicable,
+    #   4 = success. Anything else we treat as terminal too; the only
+    #   reliable failure signal we've seen is a truthy `error` field on
+    #   a step, so we use that to decide the overall result.
     STEP_STATUS_IN_PROGRESS = (0, 1, 2)
 
     def trigger_conversion(self, blueprint_id: str) -> str:
@@ -431,21 +431,23 @@ class NetAppShiftClient:
         poll_interval: int = 30,
         timeout: int = 14400,
     ) -> None:
-        """Poll execution steps until all succeed, or raise on failure/timeout."""
+        """Poll execution steps until all finish, or raise on error/timeout.
+
+        A step is:
+          - *in progress* if ``status`` is in ``STEP_STATUS_IN_PROGRESS``;
+          - *failed* if it carries a truthy ``error`` field;
+          - otherwise *terminal/done* (covers both "success" and
+            "skipped/not-applicable").
+
+        The call returns once no step is in progress and no step reported
+        an error.
+        """
         deadline = time.monotonic() + timeout
         last_desc = ""
         while True:
             _, steps = self.get_execution_steps(execution_id)
 
-            failed = [
-                s for s in steps
-                if s.get("error")
-                or (
-                    s.get("status") is not None
-                    and s.get("status") != self.STEP_STATUS_SUCCESS
-                    and s.get("status") not in self.STEP_STATUS_IN_PROGRESS
-                )
-            ]
+            failed = [s for s in steps if s.get("error")]
             if failed:
                 details = "; ".join(
                     f"{s.get('description', '?')} "
@@ -456,20 +458,19 @@ class NetAppShiftClient:
                     f"NetApp Shift execution {execution_id} failed: {details}"
                 )
 
-            if steps and all(
-                s.get("status") == self.STEP_STATUS_SUCCESS for s in steps
-            ):
+            in_progress = [
+                s for s in steps
+                if s.get("status") in self.STEP_STATUS_IN_PROGRESS
+            ]
+            if steps and not in_progress:
                 logger.info(
                     "  NetApp Shift execution %s completed (%d steps).",
                     execution_id, len(steps),
                 )
                 return
 
-            current = next(
-                (s for s in steps if s.get("status") != self.STEP_STATUS_SUCCESS),
-                None,
-            )
-            if current:
+            if in_progress:
+                current = in_progress[0]
                 desc = (
                     f"{current.get('description', '')} "
                     f"(status={current.get('status')})"
