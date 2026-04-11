@@ -453,7 +453,7 @@ class NetAppShiftClient:
         self,
         execution_id: str,
         *,
-        poll_interval: int = 30,
+        poll_interval: int = 60,
         timeout: int = 14400,
     ) -> None:
         """Poll execution steps until every step has reached status=4
