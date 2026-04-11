@@ -1,14 +1,20 @@
 """NetApp Shift backend — implements steps 6-10 via the NetApp Shift REST API.
 
-Step 6 reuses the vCenter shutdown logic from ProxmoxNativeBackend. Steps 7-10
+Step 6 reuses the vCenter shutdown logic from ProxmoxNativeBackend. Steps 7-11
 orchestrate the NetApp Shift lifecycle:
 
   7. Create the Resource Group (protectionGroup) for the VM.
   8. Create the Blueprint (drPlan) referencing that Resource Group.
-  9. Trigger the disk conversion (bluePrint/{id}/convert/execution), wait
-     for it to finish, then move the converted qcow2 files into the
-     Proxmox images directory, attach them to the VM, and start it.
- 10. Verify the VM is running with all disks on the final storage.
+  9. Trigger the disk conversion (bluePrint/{id}/convert/execution) and
+     wait for it to reach a terminal state.
+ 10. Move the converted qcow2 files into the Proxmox images directory,
+     attach them to the VM, allocate efidisk0 (if OVMF), and start it.
+ 11. Verify the VM is running with all disks on the final storage.
+
+Splitting the conversion (step 9) and the import (step 10) lets the
+operator rerun ``--skip-to 10`` after troubleshooting a failed
+conversion — or after performing the conversion manually — without
+re-triggering NetApp Shift.
 
 Moving the converted qcow2 into Proxmox is intentionally out of scope here —
 it will be wired up in a follow-up change.
@@ -21,7 +27,7 @@ from ..exceptions import MigrationError
 from ..netapp_shift import NetAppShiftClient
 from .base import BackendContext, DiskMigrationBackend
 
-SOURCE_DISCOVERY_SETTLE_SECONDS = 10
+SOURCE_DISCOVERY_SETTLE_SECONDS = 30
 
 
 class NetAppShiftBackend(DiskMigrationBackend):
@@ -190,20 +196,18 @@ class NetAppShiftBackend(DiskMigrationBackend):
         ctx.log.info("  Blueprint created (id=%s).", self._blueprint_id)
 
     # ------------------------------------------------------------------
-    # Step 9 — trigger conversion, wait for it, import the qcow2 files
+    # Step 9 — trigger conversion and wait for it
     # ------------------------------------------------------------------
 
     def step_9_move_disks(self, ctx: BackendContext, vm) -> None:
-        """Step 9 (NetApp Shift): trigger + wait + import converted disks."""
-        from ..migration import VM_START_SETTLE_SECONDS
-
+        """Step 9 (NetApp Shift): trigger conversion and wait for completion."""
         cfg = ctx.config.migration
         bp_name = f"{vm.name}-bp"
 
         if ctx.dry_run:
             ctx.log.info(
-                "  DRY RUN: would trigger conversion for blueprint %s, wait "
-                "for completion, and import the converted qcow2 files.",
+                "  DRY RUN: would trigger conversion for blueprint %s and wait "
+                "for completion.",
                 bp_name,
             )
             return
@@ -216,11 +220,6 @@ class NetAppShiftBackend(DiskMigrationBackend):
                     "(re-run from step 8)."
                 )
 
-        vmid = ctx.resolve_vmid()
-        vm_config = ctx.resolve_vm_config(vm)
-        num_disks = len(vm_config["disks"])
-
-        # -- Trigger + wait ------------------------------------------------
         if self._execution_id is None:
             ctx.log.info(
                 "  Triggering NetApp Shift conversion for blueprint %s ...",
@@ -243,7 +242,32 @@ class NetAppShiftBackend(DiskMigrationBackend):
         self.client.wait_for_execution(self._execution_id, timeout=timeout)
         ctx.log.info("  Conversion finished successfully.")
 
-        # -- Move + attach the converted qcow2 files ----------------------
+    # ------------------------------------------------------------------
+    # Step 10 — import converted qcow2 files into Proxmox and start VM
+    # ------------------------------------------------------------------
+
+    def step_10_import_disks(self, ctx: BackendContext, vm) -> None:
+        """Step 10 (NetApp Shift): move converted qcow2 files into Proxmox.
+
+        This step is independent of step 9 so the operator can rerun it
+        with ``--skip-to 10`` after either troubleshooting a failed
+        conversion or performing the conversion manually.
+        """
+        from ..migration import VM_START_SETTLE_SECONDS
+
+        cfg = ctx.config.migration
+        vmid = ctx.resolve_vmid()
+        vm_config = ctx.resolve_vm_config(vm)
+        num_disks = len(vm_config["disks"])
+
+        if ctx.dry_run:
+            ctx.log.info(
+                "  DRY RUN: would import %d converted disk(s) for %s into VMID %d "
+                "and start the VM.",
+                num_disks, vm.name, vmid,
+            )
+            return
+
         ctx.log.info(
             "  Importing converted disks for %s (VMID %d) ...", vm.name, vmid,
         )
@@ -257,7 +281,6 @@ class NetAppShiftBackend(DiskMigrationBackend):
             netapp_qtree=cfg.netapp_destination_qtree,
         )
 
-        # -- Start the VM on its new disks --------------------------------
         ctx.log.info("  Starting VMID %d ...", vmid)
         ctx.px.start_vm(vmid)
         ctx.log.info(
@@ -268,10 +291,10 @@ class NetAppShiftBackend(DiskMigrationBackend):
         ctx.log.info("  Ready to proceed.")
 
     # ------------------------------------------------------------------
-    # Step 10 — verify VM on final storage
+    # Step 11 — verify VM on final storage
     # ------------------------------------------------------------------
 
-    def step_10_verify(self, ctx: BackendContext, vm) -> None:
+    def step_11_verify(self, ctx: BackendContext, vm) -> None:
         """Step 10 (NetApp Shift): verify VM is running with expected disks."""
         from ..exceptions import ProxmoxOperationError
         from ..migration import VM_FULL_BOOT_SECONDS

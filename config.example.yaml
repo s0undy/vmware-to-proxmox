@@ -76,11 +76,11 @@ migration:
   purge_vmware_script: "C:\\TMP\\pveMigration\\purge-vmware-tools.ps1"        # --purge-vmware-script
   import_nic_script: "C:\\TMP\\pveMigration\\importNicConfig.ps1"             # --import-nic-script
 
-  # VirtIO ISO settings (for step 11 — install VirtIO drivers from mounted ISO):
+  # VirtIO ISO settings (for step 12 — install VirtIO drivers from mounted ISO):
   virtio_iso_storage: "local"                                                  # --virtio-iso-storage
   virtio_iso_filename: "virtio-win-0.1.271-1.iso"                             # --virtio-iso-filename
 
-  # Disk-migration backend (owns steps 6-10).
+  # Disk-migration backend (owns steps 6-11).
   #   proxmox-native = default; uses Proxmox API + SSH to rewrite descriptors
   #                    and move/convert disks with qemu-img.
   #   netapp-shift   = delegate to NetApp Shift via REST API (requires the
@@ -147,7 +147,7 @@ migration:
 # ---------------------------------------------------------------------------
 # Workflow control
 # ---------------------------------------------------------------------------
-skip_to: 1                           # --skip-to    (resume from step N, 1-14)
+skip_to: 1                           # --skip-to    (resume from step N, 1-15)
 dry_run: false                       # --dry-run    (log actions without executing)
 parallel: false                      # --parallel   (migrate all VMs concurrently)
 verbose: false                       # --verbose    (enable debug-level logging)

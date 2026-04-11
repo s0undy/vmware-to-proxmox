@@ -1,4 +1,4 @@
-"""Migration orchestrator — ties all fourteen steps together."""
+"""Migration orchestrator — ties all fifteen steps together."""
 
 import logging
 import time
@@ -22,7 +22,7 @@ class _VMLoggerAdapter(logging.LoggerAdapter):
         return f"[{self.extra['vm']}] {msg}", kwargs
 
 
-TOTAL_STEPS = 14
+TOTAL_STEPS = 15
 
 # -- Timing constants (seconds) ------------------------------------------------
 SHUTDOWN_SETTLE_SECONDS = 15       # Post-shutdown grace before modifying Proxmox
@@ -30,9 +30,9 @@ VM_START_SETTLE_SECONDS = 30       # Wait after VM power-on command
 VM_FULL_BOOT_SECONDS = 40         # Full boot after verification
 VIRTIO_INSTALL_SETTLE_SECONDS = 20   # VM settle after VirtIO driver install
 ISO_MOUNT_WAIT_SECONDS = 5         # ISO availability after mount
-PRE_REBOOT_PAUSE_SECONDS = 10      # Grace period before reboot (step 12)
-POST_REBOOT_BOOT_SECONDS = 40      # Boot after reboot (steps 12, 13)
-NIC_RESTORE_PRE_REBOOT_SECONDS = 15  # Grace period before reboot (step 13)
+PRE_REBOOT_PAUSE_SECONDS = 10      # Grace period before reboot (step 13)
+POST_REBOOT_BOOT_SECONDS = 40      # Boot after reboot (steps 13, 14)
+NIC_RESTORE_PRE_REBOOT_SECONDS = 15  # Grace period before reboot (step 14)
 VM_READY_TIMEOUT_SECONDS = 300     # Max wait for VM to reach 'running'
 VM_READY_POLL_SECONDS = 5          # Poll interval for VM ready check
 
@@ -113,11 +113,12 @@ class MigrationOrchestrator:
             (7, "Rewrite VMDK descriptors", self._step_7_rewrite_vmdk_descriptors),
             (8, "Start VM in Proxmox", self._step_8_start_vm),
             (9, "Move disks to final storage", self._step_9_move_disks),
-            (10, "Verify VM on final storage", self._step_10_verify),
-            (11, "Install VirtIO drivers from ISO", self._step_11_install_virtio_drivers),
-            (12, "Purge VMware Tools", self._step_12_purge_vmware_tools),
-            (13, "Restore NIC configuration", self._step_13_import_nic_config),
-            (14, "Finalize VM", self._step_14_finalize),
+            (10, "Import converted disks", self._step_10_import_disks),
+            (11, "Verify VM on final storage", self._step_11_verify),
+            (12, "Install VirtIO drivers from ISO", self._step_12_install_virtio_drivers),
+            (13, "Purge VMware Tools", self._step_13_purge_vmware_tools),
+            (14, "Restore NIC configuration", self._step_14_import_nic_config),
+            (15, "Finalize VM", self._step_15_finalize),
         ]
 
         for num, label, fn in steps:
@@ -265,11 +266,14 @@ class MigrationOrchestrator:
     def _step_9_move_disks(self, vm):
         self.backend.step_9_move_disks(self._build_backend_context(), vm)
 
-    def _step_10_verify(self, vm):
-        self.backend.step_10_verify(self._build_backend_context(), vm)
+    def _step_10_import_disks(self, vm):
+        self.backend.step_10_import_disks(self._build_backend_context(), vm)
+
+    def _step_11_verify(self, vm):
+        self.backend.step_11_verify(self._build_backend_context(), vm)
 
     def _build_backend_context(self) -> BackendContext:
-        """Build a BackendContext for the disk-migration backend (steps 6-10)."""
+        """Build a BackendContext for the disk-migration backend (steps 6-11)."""
         return BackendContext(
             vc=self.vc,
             px=self.px,
@@ -283,7 +287,7 @@ class MigrationOrchestrator:
         )
 
     def _build_step_context(self) -> StepContext:
-        """Build a StepContext for OS handler steps 11-13."""
+        """Build a StepContext for OS handler steps 12-14."""
         return StepContext(
             vmid=self._resolve_vmid(),
             px=self.px,
@@ -295,16 +299,16 @@ class MigrationOrchestrator:
             log=self.log,
         )
 
-    def _step_11_install_virtio_drivers(self, vm):
-        self.os_handler.step_11_install_virtio_drivers(self._build_step_context())
+    def _step_12_install_virtio_drivers(self, vm):
+        self.os_handler.step_12_install_virtio_drivers(self._build_step_context())
 
-    def _step_12_purge_vmware_tools(self, vm):
-        self.os_handler.step_12_purge_vmware_tools(self._build_step_context())
+    def _step_13_purge_vmware_tools(self, vm):
+        self.os_handler.step_13_purge_vmware_tools(self._build_step_context())
 
-    def _step_13_import_nic_config(self, vm):
-        self.os_handler.step_13_restore_nic_config(self._build_step_context())
+    def _step_14_import_nic_config(self, vm):
+        self.os_handler.step_14_restore_nic_config(self._build_step_context())
 
-    def _step_14_finalize(self, vm):
+    def _step_15_finalize(self, vm):
         vmid = self._resolve_vmid()
 
         if self.dry_run:
@@ -329,9 +333,9 @@ class MigrationOrchestrator:
             self.log.info("  NICs already enabled (enable_nics_on_boot=true), skipping.")
 
         # Final reboot — skip if NICs were already enabled on boot,
-        # because step 13 (NIC restore) already performed a reboot.
+        # because step 14 (NIC restore) already performed a reboot.
         if self.config.migration.enable_nics_on_boot:
-            self.log.info("  Skipping final reboot (already rebooted in step 13).")
+            self.log.info("  Skipping final reboot (already rebooted in step 14).")
         else:
             self.px.reboot_vm(vmid)
             self.log.info("  Final reboot initiated. Waiting %ds for VM to boot ...",

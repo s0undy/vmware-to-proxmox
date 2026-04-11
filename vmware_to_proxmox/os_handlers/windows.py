@@ -69,7 +69,7 @@ class WindowsHandler(OSHandler):
             )
         logger.info("  VirtIO guest tools installed.")
 
-    def step_11_install_virtio_drivers(self, ctx: StepContext):
+    def step_12_install_virtio_drivers(self, ctx: StepContext):
         from ..migration import ISO_MOUNT_WAIT_SECONDS, VIRTIO_INSTALL_SETTLE_SECONDS
 
         iso_storage = ctx.config.migration.virtio_iso_storage
@@ -129,7 +129,7 @@ class WindowsHandler(OSHandler):
                      ctx.effective_wait(VIRTIO_INSTALL_SETTLE_SECONDS))
         ctx.sleep_fn(VIRTIO_INSTALL_SETTLE_SECONDS)
 
-    def step_12_purge_vmware_tools(self, ctx: StepContext):
+    def step_13_purge_vmware_tools(self, ctx: StepContext):
         from ..migration import PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS
 
         script = ctx.config.migration.purge_vmware_script
@@ -156,7 +156,7 @@ class WindowsHandler(OSHandler):
 
         self._reboot_and_wait(ctx, PRE_REBOOT_PAUSE_SECONDS, POST_REBOOT_BOOT_SECONDS)
 
-    def step_13_restore_nic_config(self, ctx: StepContext):
+    def step_14_restore_nic_config(self, ctx: StepContext):
         from ..migration import NIC_RESTORE_PRE_REBOOT_SECONDS, POST_REBOOT_BOOT_SECONDS
 
         script = ctx.config.migration.import_nic_script

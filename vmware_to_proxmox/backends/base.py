@@ -29,7 +29,9 @@ class BackendContext:
 
 
 class DiskMigrationBackend(ABC):
-    """Owns steps 6-10: shutdown, descriptor rewrite, start, move, verify."""
+    """Owns steps 6-11: shutdown, descriptor rewrite, start, move,
+    import converted disks, verify.
+    """
 
     name: str = "base"
 
@@ -48,5 +50,13 @@ class DiskMigrationBackend(ABC):
     @abstractmethod
     def step_9_move_disks(self, ctx: BackendContext, vm) -> None: ...
 
+    def step_10_import_disks(self, ctx: BackendContext, vm) -> None:
+        """Import externally converted disks into the Proxmox VM.
+
+        Default: no-op. Backends that perform disk conversion outside
+        Proxmox (e.g. NetApp Shift) override this to move the resulting
+        files into the Proxmox images directory and attach them.
+        """
+
     @abstractmethod
-    def step_10_verify(self, ctx: BackendContext, vm) -> None: ...
+    def step_11_verify(self, ctx: BackendContext, vm) -> None: ...
