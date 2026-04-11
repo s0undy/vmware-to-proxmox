@@ -10,6 +10,9 @@ Authentication uses POST /api/tenant/session, then propagates the returned
 session id via the ``netapp-sie-sessionid`` header on every subsequent call.
 Payload shapes are ported from the reference Python implementation at
 https://github.com/NetApp/shift-api-automation/tree/main/Python.
+These are not fully working, and has to be modified to fit the needs of this migration tool.
+BSD 3-Clause License
+Copyright (c) 2025, NetApp
 """
 
 import logging
