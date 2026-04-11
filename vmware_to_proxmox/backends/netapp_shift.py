@@ -21,6 +21,8 @@ from ..exceptions import MigrationError
 from ..netapp_shift import NetAppShiftClient
 from .base import BackendContext, DiskMigrationBackend
 
+SOURCE_DISCOVERY_SETTLE_SECONDS = 10
+
 
 class NetAppShiftBackend(DiskMigrationBackend):
     name = "netapp-shift"
@@ -91,6 +93,17 @@ class NetAppShiftBackend(DiskMigrationBackend):
         self._source_virt_env_id = self.client.get_virt_env_id(self._source_site_id)
         self._dest_site_id = self.client.get_site_id_by_name(cfg.netapp_destination_site)
         self._dest_virt_env_id = self.client.get_virt_env_id(self._dest_site_id)
+
+        # Refresh the source inventory so the unprotected-VM list reflects
+        # the VM's current layout (disks, NICs, ...) before we snapshot it.
+        ctx.log.info("  Triggering NetApp Shift source discovery ...")
+        self.client.discover_source(self._source_site_id, self._source_virt_env_id)
+        ctx.log.info(
+            "  Waiting %ds for discovery to settle ...",
+            ctx.effective_wait(SOURCE_DISCOVERY_SETTLE_SECONDS),
+        )
+        ctx.sleep_fn(SOURCE_DISCOVERY_SETTLE_SECONDS)
+
         self._vm_info = self.client.get_unprotected_vm_by_name(
             self._source_site_id, self._source_virt_env_id, vm.name,
         )

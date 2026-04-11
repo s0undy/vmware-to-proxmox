@@ -168,6 +168,21 @@ class NetAppShiftClient:
             )
         return envs[0]["_id"]
 
+    def discover_source(self, site_id: str, virt_env_id: str) -> None:
+        """Kick off a source-site discovery.
+
+        Fire-and-forget: NetApp Shift accepts an empty POST and starts
+        refreshing its inventory of the source virtualization environment.
+        Callers should wait a few seconds before reading the unprotected
+        VM list so that the refresh has time to settle.
+        """
+        self._request(
+            "POST",
+            SETUP_PORT,
+            "/api/setup/source/discovery",
+            params={"siteId": site_id, "virtEnvId": virt_env_id},
+        )
+
     def get_unprotected_vm_by_name(
         self, site_id: str, virt_env_id: str, vm_name: str,
     ) -> dict:
