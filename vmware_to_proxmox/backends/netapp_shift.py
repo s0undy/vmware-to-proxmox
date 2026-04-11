@@ -5,8 +5,10 @@ orchestrate the NetApp Shift lifecycle:
 
   7. Create the Resource Group (protectionGroup) for the VM.
   8. Create the Blueprint (drPlan) referencing that Resource Group.
-  9. Trigger the disk conversion (bluePrint/{id}/convert/execution).
- 10. Poll execution steps until the conversion reaches a terminal status.
+  9. Trigger the disk conversion (bluePrint/{id}/convert/execution), wait
+     for it to finish, then move the converted qcow2 files into the
+     Proxmox images directory, attach them to the VM, and start it.
+ 10. Verify the VM is running with all disks on the final storage.
 
 Moving the converted qcow2 into Proxmox is intentionally out of scope here —
 it will be wired up in a follow-up change.
@@ -175,15 +177,22 @@ class NetAppShiftBackend(DiskMigrationBackend):
         ctx.log.info("  Blueprint created (id=%s).", self._blueprint_id)
 
     # ------------------------------------------------------------------
-    # Step 9 — trigger migration
+    # Step 9 — trigger conversion, wait for it, import the qcow2 files
     # ------------------------------------------------------------------
 
     def step_9_move_disks(self, ctx: BackendContext, vm) -> None:
-        """Step 9 (NetApp Shift): trigger the disk conversion execution."""
+        """Step 9 (NetApp Shift): trigger + wait + import converted disks."""
+        from ..migration import VM_START_SETTLE_SECONDS
+
+        cfg = ctx.config.migration
         bp_name = f"{vm.name}-bp"
 
         if ctx.dry_run:
-            ctx.log.info("  DRY RUN: would trigger conversion for blueprint %s", bp_name)
+            ctx.log.info(
+                "  DRY RUN: would trigger conversion for blueprint %s, wait "
+                "for completion, and import the converted qcow2 files.",
+                bp_name,
+            )
             return
 
         if self._blueprint_id is None:
@@ -194,40 +203,102 @@ class NetAppShiftBackend(DiskMigrationBackend):
                     "(re-run from step 8)."
                 )
 
-        ctx.log.info(
-            "  Triggering NetApp Shift conversion for blueprint %s ...",
-            self._blueprint_id,
-        )
-        self._execution_id = self.client.trigger_conversion(self._blueprint_id)
-        ctx.log.info("  Conversion triggered (execution id: %s).", self._execution_id)
+        vmid = ctx.resolve_vmid()
+        vm_config = ctx.resolve_vm_config(vm)
+        num_disks = len(vm_config["disks"])
 
-    # ------------------------------------------------------------------
-    # Step 10 — poll until terminal status
-    # ------------------------------------------------------------------
-
-    def step_10_verify(self, ctx: BackendContext, vm) -> None:
-        """Step 10 (NetApp Shift): poll execution steps until done."""
-        timeout = ctx.config.migration.disk_move_timeout
-
-        if ctx.dry_run:
-            ctx.log.info(
-                "  DRY RUN: would poll execution %s until completion",
-                self._execution_id or "<unknown>",
-            )
-            return
-
+        # -- Trigger + wait ------------------------------------------------
         if self._execution_id is None:
-            raise MigrationError(
-                "Cannot poll NetApp Shift conversion: no execution id in memory "
-                "(re-run from step 9 to start a new conversion)."
+            ctx.log.info(
+                "  Triggering NetApp Shift conversion for blueprint %s ...",
+                self._blueprint_id,
+            )
+            self._execution_id = self.client.trigger_conversion(self._blueprint_id)
+            ctx.log.info(
+                "  Conversion triggered (execution id: %s).", self._execution_id,
+            )
+        else:
+            ctx.log.info(
+                "  Reusing existing execution id %s (skipping trigger).",
+                self._execution_id,
             )
 
+        timeout = cfg.disk_move_timeout
         ctx.log.info(
             "  Polling NetApp Shift conversion status (timeout %ds) ...", timeout,
         )
         self.client.wait_for_execution(self._execution_id, timeout=timeout)
         ctx.log.info("  Conversion finished successfully.")
+
+        # -- Move + attach the converted qcow2 files ----------------------
         ctx.log.info(
-            "  Note: moving the converted qcow2 into Proxmox is a separate "
-            "follow-up step (not yet implemented)."
+            "  Importing converted disks for %s (VMID %d) ...", vm.name, vmid,
         )
+        ctx.px.import_disks_from_netapp_shift(
+            vmid=vmid,
+            vm_name=vm.name,
+            num_disks=num_disks,
+            firmware=vm_config["firmware"],
+            final_storage=cfg.proxmox_final_storage,
+            netapp_volume=cfg.netapp_destination_volume,
+            netapp_qtree=cfg.netapp_destination_qtree,
+        )
+
+        # -- Start the VM on its new disks --------------------------------
+        ctx.log.info("  Starting VMID %d ...", vmid)
+        ctx.px.start_vm(vmid)
+        ctx.log.info(
+            "  Start command sent. Waiting %ds for VM to boot ...",
+            ctx.effective_wait(VM_START_SETTLE_SECONDS),
+        )
+        ctx.sleep_fn(VM_START_SETTLE_SECONDS)
+        ctx.log.info("  Ready to proceed.")
+
+    # ------------------------------------------------------------------
+    # Step 10 — verify VM on final storage
+    # ------------------------------------------------------------------
+
+    def step_10_verify(self, ctx: BackendContext, vm) -> None:
+        """Step 10 (NetApp Shift): verify VM is running with expected disks."""
+        from ..exceptions import ProxmoxOperationError
+        from ..migration import VM_FULL_BOOT_SECONDS
+
+        vmid = ctx.resolve_vmid()
+        vm_config = ctx.resolve_vm_config(vm)
+        final_storage = ctx.config.migration.proxmox_final_storage
+
+        if ctx.dry_run:
+            ctx.log.info(
+                "  DRY RUN: would verify VMID %d is running on %s",
+                vmid, final_storage,
+            )
+            return
+
+        status = ctx.px.get_vm_status(vmid)
+        ctx.log.info("  VM %d status: %s", vmid, status)
+        if status != "running":
+            raise ProxmoxOperationError(
+                f"VM {vmid} is not running (status: {status})"
+            )
+
+        px_config = ctx.px.get_vm_config_proxmox(vmid)
+        disk_keys = [f"scsi{i}" for i in range(len(vm_config["disks"]))]
+        if vm_config["firmware"] == "efi":
+            disk_keys.append("efidisk0")
+
+        for key in disk_keys:
+            value = px_config.get(key, "")
+            if not value.startswith(f"{final_storage}:"):
+                raise ProxmoxOperationError(
+                    f"Disk {key} is not on final storage {final_storage}: {value}"
+                )
+            ctx.log.info("  %s: %s", key, value)
+
+        ctx.log.info(
+            "  Verification passed — all disks on %s, VM running.", final_storage,
+        )
+        ctx.log.info(
+            "  Waiting %ds for VM to fully boot ...",
+            ctx.effective_wait(VM_FULL_BOOT_SECONDS),
+        )
+        ctx.sleep_fn(VM_FULL_BOOT_SECONDS)
