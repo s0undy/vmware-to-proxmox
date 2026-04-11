@@ -5,8 +5,8 @@ orchestrate the NetApp Shift lifecycle:
 
   7. Create the Resource Group (protectionGroup) for the VM.
   8. Create the Blueprint (drPlan) referencing that Resource Group.
-  9. Trigger the migration (migrate/execution).
- 10. Poll until the migration reaches a terminal status.
+  9. Trigger the disk conversion (bluePrint/{id}/convert/execution).
+ 10. Poll execution steps until the conversion reaches a terminal status.
 
 Moving the converted qcow2 into Proxmox is intentionally out of scope here —
 it will be wired up in a follow-up change.
@@ -179,57 +179,54 @@ class NetAppShiftBackend(DiskMigrationBackend):
     # ------------------------------------------------------------------
 
     def step_9_move_disks(self, ctx: BackendContext, vm) -> None:
-        """Step 9 (NetApp Shift): trigger the migration execution."""
+        """Step 9 (NetApp Shift): trigger the disk conversion execution."""
         bp_name = f"{vm.name}-bp"
 
         if ctx.dry_run:
-            ctx.log.info("  DRY RUN: would trigger migration for blueprint %s", bp_name)
+            ctx.log.info("  DRY RUN: would trigger conversion for blueprint %s", bp_name)
             return
 
         if self._blueprint_id is None:
             self._blueprint_id = self.client.get_blueprint_id_by_name(bp_name)
             if self._blueprint_id is None:
                 raise MigrationError(
-                    f"Cannot trigger migration: blueprint {bp_name} not found "
+                    f"Cannot trigger conversion: blueprint {bp_name} not found "
                     "(re-run from step 8)."
                 )
 
         ctx.log.info(
-            "  Triggering NetApp Shift migration for blueprint %s ...",
+            "  Triggering NetApp Shift conversion for blueprint %s ...",
             self._blueprint_id,
         )
-        self._execution_id = self.client.trigger_migration(self._blueprint_id)
-        ctx.log.info("  Migration triggered (execution id: %s).", self._execution_id)
+        self._execution_id = self.client.trigger_conversion(self._blueprint_id)
+        ctx.log.info("  Conversion triggered (execution id: %s).", self._execution_id)
 
     # ------------------------------------------------------------------
     # Step 10 — poll until terminal status
     # ------------------------------------------------------------------
 
     def step_10_verify(self, ctx: BackendContext, vm) -> None:
-        """Step 10 (NetApp Shift): poll until the migration finishes."""
-        bp_name = f"{vm.name}-bp"
+        """Step 10 (NetApp Shift): poll execution steps until done."""
         timeout = ctx.config.migration.disk_move_timeout
 
         if ctx.dry_run:
-            ctx.log.info("  DRY RUN: would poll blueprint %s until completion", bp_name)
+            ctx.log.info(
+                "  DRY RUN: would poll execution %s until completion",
+                self._execution_id or "<unknown>",
+            )
             return
 
-        if self._blueprint_id is None:
-            self._blueprint_id = self.client.get_blueprint_id_by_name(bp_name)
-            if self._blueprint_id is None:
-                raise MigrationError(
-                    f"Cannot poll migration: blueprint {bp_name} not found."
-                )
+        if self._execution_id is None:
+            raise MigrationError(
+                "Cannot poll NetApp Shift conversion: no execution id in memory "
+                "(re-run from step 9 to start a new conversion)."
+            )
 
         ctx.log.info(
-            "  Polling NetApp Shift migration status (timeout %ds) ...", timeout,
+            "  Polling NetApp Shift conversion status (timeout %ds) ...", timeout,
         )
-        status = self.client.wait_for_migration(self._blueprint_id, timeout=timeout)
-        if "complete" not in status:
-            raise MigrationError(
-                f"NetApp Shift migration ended with status: {status}"
-            )
-        ctx.log.info("  Migration finished — status: %s", status)
+        self.client.wait_for_execution(self._execution_id, timeout=timeout)
+        ctx.log.info("  Conversion finished successfully.")
         ctx.log.info(
             "  Note: moving the converted qcow2 into Proxmox is a separate "
             "follow-up step (not yet implemented)."

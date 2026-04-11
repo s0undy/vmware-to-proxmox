@@ -4,7 +4,7 @@ Talks to the multi-port NetApp Shift API surface:
 
   - :3698 — tenant sessions (login/logout)
   - :3700 — setup APIs (sites, VMs, resource groups, blueprints)
-  - :3704 — recovery APIs (migrate execution + status polling)
+  - :3704 — recovery APIs (convert execution + execution step polling)
 
 Authentication uses POST /api/tenant/session, then propagates the returned
 session id via the ``netapp-sie-sessionid`` header on every subsequent call.
@@ -387,59 +387,100 @@ class NetAppShiftClient:
         return None
 
     # ------------------------------------------------------------------
-    # Migration execution + status
+    # Conversion execution + status
     # ------------------------------------------------------------------
+    #
+    # NetApp Shift execution step status codes (observed):
+    #   1 = pending, 2 = running, 4 = success.
+    # Anything else (3, 5, ...) is treated as a failure. An `error` field
+    # on a step is also treated as failure regardless of status code.
+    STEP_STATUS_SUCCESS = 4
+    STEP_STATUS_IN_PROGRESS = (0, 1, 2)
 
-    def trigger_migration(self, blueprint_id: str) -> str:
-        body = {
-            "serviceAccounts": {
-                "common": {"loginId": None, "password": None},
-                "vms": [],
-            }
-        }
+    def trigger_conversion(self, blueprint_id: str) -> str:
+        """POST /api/recovery/bluePrint/{id}/convert/execution.
+
+        Returns the execution _id that can be polled via
+        /api/recovery/execution/{execution_id}/steps.
+        """
         payload = self._request(
             "POST",
             RECOVERY_PORT,
-            f"/api/recovery/drPlan/{blueprint_id}/migrate/execution",
-            json=body,
+            f"/api/recovery/bluePrint/{blueprint_id}/convert/execution",
         )
         execution_id = payload.get("_id")
         if not execution_id:
             raise NetAppShiftError(
-                f"NetApp Shift trigger migration response missing _id: {payload}"
+                f"NetApp Shift trigger conversion response missing _id: {payload}"
             )
         return execution_id
 
-    def get_migration_status(self, blueprint_id: str) -> str:
+    def get_execution_steps(self, execution_id: str) -> tuple[str, list[dict]]:
+        """Return (job_type, steps) for a running or finished execution."""
         payload = self._request(
-            "GET", RECOVERY_PORT, "/api/recovery/drplan/status",
+            "GET",
+            RECOVERY_PORT,
+            f"/api/recovery/execution/{execution_id}/steps",
         )
-        items = payload.get("list", []) if isinstance(payload, dict) else payload
-        for entry in items or []:
-            dr_plan = entry.get("drPlan") or {}
-            if dr_plan.get("_id") == blueprint_id:
-                return dr_plan.get("recoveryStatus") or ""
-        return ""
+        return payload.get("type", ""), payload.get("steps") or []
 
-    def wait_for_migration(
+    def wait_for_execution(
         self,
-        blueprint_id: str,
+        execution_id: str,
         *,
         poll_interval: int = 30,
         timeout: int = 14400,
-    ) -> str:
+    ) -> None:
+        """Poll execution steps until all succeed, or raise on failure/timeout."""
         deadline = time.monotonic() + timeout
-        last_status = ""
+        last_desc = ""
         while True:
-            status = self.get_migration_status(blueprint_id)
-            if status and status != last_status:
-                logger.info("  NetApp Shift migration status: %s", status)
-                last_status = status
-            if status and ("complete" in status or "error" in status):
-                return status
+            _, steps = self.get_execution_steps(execution_id)
+
+            failed = [
+                s for s in steps
+                if s.get("error")
+                or (
+                    s.get("status") is not None
+                    and s.get("status") != self.STEP_STATUS_SUCCESS
+                    and s.get("status") not in self.STEP_STATUS_IN_PROGRESS
+                )
+            ]
+            if failed:
+                details = "; ".join(
+                    f"{s.get('description', '?')} "
+                    f"(status={s.get('status')}, error={s.get('error')})"
+                    for s in failed
+                )
+                raise NetAppShiftError(
+                    f"NetApp Shift execution {execution_id} failed: {details}"
+                )
+
+            if steps and all(
+                s.get("status") == self.STEP_STATUS_SUCCESS for s in steps
+            ):
+                logger.info(
+                    "  NetApp Shift execution %s completed (%d steps).",
+                    execution_id, len(steps),
+                )
+                return
+
+            current = next(
+                (s for s in steps if s.get("status") != self.STEP_STATUS_SUCCESS),
+                None,
+            )
+            if current:
+                desc = (
+                    f"{current.get('description', '')} "
+                    f"(status={current.get('status')})"
+                )
+                if desc != last_desc:
+                    logger.info("  NetApp Shift execution step: %s", desc)
+                    last_desc = desc
+
             if time.monotonic() >= deadline:
                 raise NetAppShiftError(
-                    f"NetApp Shift migration {blueprint_id} did not finish "
-                    f"within {timeout}s (last status: {status or 'unknown'})"
+                    f"NetApp Shift execution {execution_id} did not finish "
+                    f"within {timeout}s (last step: {last_desc or 'unknown'})"
                 )
             time.sleep(poll_interval)
