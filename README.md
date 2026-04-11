@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/s0undy/vmware-to-proxmox/main/logo.png" alt="lmao"/>
+  <img src="https://github.com/s0undy/vmware-to-proxmox/blob/main/logo.png" alt="lmao"/>
 </p>
 
 <h1 align="center">Automate your VMware to Proxmox migration</h1>
