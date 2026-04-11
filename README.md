@@ -12,7 +12,7 @@ The code inside of this repo implements the [Attach Disk & Move Disk (minimal do
 
 The base method has been used to migrate 80+ VMs from VMware to Proxmox, ranging from 20GB to 5TB in size.
 
-### Notes about NetApp
+## Notes about NetApp
 For those of you that have access to a NetApp Filer(NFS) I have good news. Utilizing [NetApp Shift Toolkit](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-overview.html#toolkit-overview) it is possible to reduce the migration time with by up to 99%. As an example migrating a 100GB VM using the base method would take about 12 minutes, with most of the time spent converting the disk. Using Shift to do the disk conversion the same migration only takes about 5 minutes. This is even more impactful for large VMs as a multi TB VM could take hours to convert. Using Shift it only takes about 1 minute to convert a 1TB VM from VMDK to QCOW2.
 
 NetApp have also created a full [Migrate VMs from VMware to Proxmox VE](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-migrate-esxi2proxmox.html) that does everything for you. As of writing this on 2026-04-12 I would advise against using it. It doesn't allow you to adjust many of the settings you want to set during the creation of the VM in Proxmox. As an example it doesn't support networks created by SDN, and it sets the machine type to i440fx making it a hassle to change after the VM has booted.
@@ -120,5 +120,5 @@ The content in this folder has been heavily inspired by different community memb
 - NetApp for their Shift Toolkit as well as the examples over at [shift-api-automation](https://github.com/NetApp/shift-api-automation) (Worth mentioning that these are not updated and I had to reverse engineer parts of the API in order to get it working...)
 
 
-# This project was built with assistance from AI (Claude).
+## This project was built with assistance from AI.
 All code has been read by a human. AI makes mistakes... and so do humans. If you intend to use this in a production environment please do your own code review(by human hands).
