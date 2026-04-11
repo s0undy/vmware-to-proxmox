@@ -40,7 +40,6 @@ GUEST_ID_TO_OSTYPE = {
 }
 
 
-
 class ProxmoxClient:
     def __init__(self, config: ProxmoxConfig):
         self.config = config
@@ -289,87 +288,90 @@ class ProxmoxClient:
         )
         dest_dir = f"/mnt/pve/{netapp_volume}/images/{vmid}"
 
-        # 1. Destination directory with drwxr----- nobody:nogroup.
-        logger.info("  Preparing destination directory %s", dest_dir)
-        self._ssh_run(f"mkdir -p {shlex.quote(dest_dir)}")
-        self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_dir)}")
-        self._ssh_run(f"chmod 0740 {shlex.quote(dest_dir)}")
-
-        # 2. Move + rename each disk (idempotent).
-        for i in range(num_disks):
-            src_name = f"{vm_name}.qcow2" if i == 0 else f"{vm_name}_{i}.qcow2"
-            dest_name = f"vm-{vmid}-disk-{i}.qcow2"
-            src_path = f"{source_dir}/{src_name}"
-            dest_path = f"{dest_dir}/{dest_name}"
-
-            _, _, src_rc = self._ssh_run(
-                f"test -f {shlex.quote(src_path)}", check=False,
-            )
-            _, _, dest_rc = self._ssh_run(
-                f"test -f {shlex.quote(dest_path)}", check=False,
-            )
-
-            if dest_rc == 0 and src_rc != 0:
-                logger.info(
-                    "    [%d/%d] %s already in place — skipping move.",
-                    i + 1, num_disks, dest_name,
-                )
-            elif src_rc == 0 and dest_rc != 0:
-                logger.info(
-                    "    [%d/%d] Moving %s -> %s ...",
-                    i + 1, num_disks, src_name, dest_name,
-                )
-                self._ssh_run(
-                    f"mv {shlex.quote(src_path)} {shlex.quote(dest_path)}"
-                )
-            elif src_rc == 0 and dest_rc == 0:
-                raise ProxmoxOperationError(
-                    f"Both source and destination exist for disk {i}: "
-                    f"{src_path} and {dest_path}. Refusing to overwrite."
-                )
-            else:
-                raise ProxmoxOperationError(
-                    f"Converted disk not found for disk index {i}: {src_path}"
-                )
-
-            # Always re-apply ownership/permissions (cheap + idempotent).
-            self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_path)}")
-            self._ssh_run(f"chmod 0640 {shlex.quote(dest_path)}")
-
-        # 3. Attach qcow2 disks to the VM and set boot order.
-        config_params: dict = {}
-        for i in range(num_disks):
-            config_params[f"scsi{i}"] = (
-                f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
-                "ssd=1,discard=on,iothread=1"
-            )
-        config_params["boot"] = "order=scsi0"
-
-        logger.info("  Attaching %d disk(s) to VMID %d ...", num_disks, vmid)
         try:
-            self.api.nodes(node).qemu(vmid).config.post(**config_params)
-        except Exception as exc:
-            raise ProxmoxOperationError(
-                f"Failed to attach imported disks to VM {vmid}: {exc}"
-            ) from exc
+            # 1. Destination directory with drwxr----- nobody:nogroup.
+            logger.info("  Preparing destination directory %s", dest_dir)
+            self._ssh_run(f"mkdir -p {shlex.quote(dest_dir)}")
+            self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_dir)}")
+            self._ssh_run(f"chmod 0740 {shlex.quote(dest_dir)}")
 
-        # 4. Allocate efidisk0 last for OVMF, so it gets the highest
-        #    disk-N number in the images directory.
-        if firmware == "efi":
-            logger.info("  Allocating efidisk0 on %s ...", final_storage)
-            try:
-                self.api.nodes(node).qemu(vmid).config.post(
-                    efidisk0=(
-                        f"{final_storage}:1,format=qcow2,"
-                        "efitype=4m,pre-enrolled-keys=1"
-                    ),
+            # 2. Move + rename each disk (idempotent).
+            for i in range(num_disks):
+                src_name = f"{vm_name}.qcow2" if i == 0 else f"{vm_name}_{i}.qcow2"
+                dest_name = f"vm-{vmid}-disk-{i}.qcow2"
+                src_path = f"{source_dir}/{src_name}"
+                dest_path = f"{dest_dir}/{dest_name}"
+
+                _, _, src_rc = self._ssh_run(
+                    f"test -f {shlex.quote(src_path)}", check=False,
                 )
+                _, _, dest_rc = self._ssh_run(
+                    f"test -f {shlex.quote(dest_path)}", check=False,
+                )
+
+                if dest_rc == 0 and src_rc != 0:
+                    logger.info(
+                        "    [%d/%d] %s already in place — skipping move.",
+                        i + 1, num_disks, dest_name,
+                    )
+                elif src_rc == 0 and dest_rc != 0:
+                    logger.info(
+                        "    [%d/%d] Moving %s -> %s ...",
+                        i + 1, num_disks, src_name, dest_name,
+                    )
+                    self._ssh_run(
+                        f"mv {shlex.quote(src_path)} {shlex.quote(dest_path)}"
+                    )
+                elif src_rc == 0 and dest_rc == 0:
+                    raise ProxmoxOperationError(
+                        f"Both source and destination exist for disk {i}: "
+                        f"{src_path} and {dest_path}. Refusing to overwrite."
+                    )
+                else:
+                    raise ProxmoxOperationError(
+                        f"Converted disk not found for disk index {i}: {src_path}"
+                    )
+
+                # Always re-apply ownership/permissions (cheap + idempotent).
+                self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_path)}")
+                self._ssh_run(f"chmod 0640 {shlex.quote(dest_path)}")
+
+            # 3. Attach qcow2 disks to the VM and set boot order.
+            config_params: dict = {}
+            for i in range(num_disks):
+                config_params[f"scsi{i}"] = (
+                    f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
+                    "ssd=1,discard=on,iothread=1"
+                )
+            config_params["boot"] = "order=scsi0"
+
+            logger.info("  Attaching %d disk(s) to VMID %d ...", num_disks, vmid)
+            try:
+                self.api.nodes(node).qemu(vmid).config.post(**config_params)
             except Exception as exc:
                 raise ProxmoxOperationError(
-                    f"Failed to allocate efidisk0 for VM {vmid}: {exc}"
+                    f"Failed to attach imported disks to VM {vmid}: {exc}"
                 ) from exc
 
-        logger.info("  Disk import complete for VMID %d.", vmid)
+            # 4. Allocate efidisk0 last for OVMF, so it gets the highest
+            #    disk-N number in the images directory.
+            if firmware == "efi":
+                logger.info("  Allocating efidisk0 on %s ...", final_storage)
+                try:
+                    self.api.nodes(node).qemu(vmid).config.post(
+                        efidisk0=(
+                            f"{final_storage}:1,format=qcow2,"
+                            "efitype=4m,pre-enrolled-keys=1"
+                        ),
+                    )
+                except Exception as exc:
+                    raise ProxmoxOperationError(
+                        f"Failed to allocate efidisk0 for VM {vmid}: {exc}"
+                    ) from exc
+
+            logger.info("  Disk import complete for VMID %d.", vmid)
+        finally:
+            self.close_ssh()
 
     def reboot_vm(self, vmid: int) -> None:
         """Reboot a Proxmox VM via ACPI signal."""
@@ -649,11 +651,6 @@ class ProxmoxClient:
         if self._ssh is not None:
             self._ssh.close()
             self._ssh = None
-
-    def close(self):
-        """Close all connections (SSH and API)."""
-        self.close_ssh()
-        self.api = None
 
     # ------------------------------------------------------------------
     # Storage path resolution

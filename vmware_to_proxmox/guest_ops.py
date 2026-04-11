@@ -77,32 +77,6 @@ class GuestOperations:
         logger.info("  Started guest process PID %d", pid)
         return self._wait_for_process(vm, pid, timeout_seconds)
 
-    def run_bash(
-        self,
-        vm: vim.VirtualMachine,
-        command: str,
-        timeout_seconds: int = 600,
-    ) -> int:
-        """Run a bash command inside the guest via VMware Tools (open-vm-tools).
-
-        Args:
-            command: The bash command string to execute.
-            timeout_seconds: Max time to wait for completion.
-
-        Returns:
-            Process exit code.
-        """
-        pm = self.vc.content.guestOperationsManager.processManager
-
-        spec = vim.vm.guest.ProcessManager.ProgramSpec()
-        spec.programPath = BASH_EXE
-        spec.arguments = f'-c {command!r}'
-
-        logger.debug("  Guest exec: %s -c %r", BASH_EXE, command)
-        pid = pm.StartProgramInGuest(vm, self.creds, spec)
-        logger.info("  Started guest process PID %d", pid)
-        return self._wait_for_process(vm, pid, timeout_seconds)
-
     def run_sudo_bash(
         self,
         vm: vim.VirtualMachine,

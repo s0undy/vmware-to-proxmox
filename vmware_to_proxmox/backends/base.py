@@ -1,4 +1,4 @@
-"""Abstract backend interface for the disk-migration phase (steps 6-10)."""
+"""Abstract backend interface for the disk-migration phase (steps 6-11)."""
 
 import logging
 from abc import ABC, abstractmethod
@@ -12,7 +12,7 @@ from ..vcenter import VCenterClient
 
 @dataclass
 class BackendContext:
-    """Handles the orchestrator passes to a backend for each step.
+    """Bundles the arguments the orchestrator passes to a backend for each step.
 
     Mirrors the StepContext used by OS handlers so the two strategy seams
     look consistent.
@@ -37,6 +37,14 @@ class DiskMigrationBackend(ABC):
 
     def prepare(self, ctx: BackendContext) -> None:
         """Optional one-time setup after vCenter/Proxmox are connected."""
+
+    def finalize(self, ctx: BackendContext) -> None:
+        """Optional teardown — release any backend-owned resources.
+
+        Called from a ``finally`` block, so it runs on both successful
+        and failed migrations. Implementations must be safe to call when
+        ``prepare`` only partially succeeded.
+        """
 
     @abstractmethod
     def step_6_shutdown(self, ctx: BackendContext, vm) -> None: ...

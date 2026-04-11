@@ -7,7 +7,7 @@ from .base import BackendContext, DiskMigrationBackend
 
 
 class ProxmoxNativeBackend(DiskMigrationBackend):
-    """Steps 6-10 implemented against the Proxmox API and SSH/SFTP."""
+    """Steps 6-11 implemented against the Proxmox API and SSH/SFTP."""
 
     name = "proxmox-native"
 

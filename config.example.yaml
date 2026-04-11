@@ -49,6 +49,7 @@ migration:
   migration_datastore: ""            # --migration-datastore       (required)
   proxmox_storage: ""                # --proxmox-storage          (required)
   proxmox_final_storage: ""          # --proxmox-final-storage    (step 9: move disks here as qcow2)
+  disk_move_timeout: 14400           # --disk-move-timeout        (per-disk timeout in seconds; default 4h)
   os_type: "auto"                    # --os-type  (auto, windows, ubuntu, other)
                                       #   auto   = detect from vCenter guestId
                                       #   other  = skip all OS-specific steps (appliances)

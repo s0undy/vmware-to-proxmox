@@ -117,7 +117,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
 
     Returns:
         A tuple of (list[AppConfig], runtime_dict) where runtime_dict contains
-        workflow flags: skip_to, dry_run, verbose, parallel.
+        workflow flags: skip_to, dry_run, parallel.
     """
     if yaml_data is None:
         yaml_data = {}

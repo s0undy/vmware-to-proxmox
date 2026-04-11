@@ -40,11 +40,6 @@ class VCenterClient:
         atexit.register(Disconnect, self.si)
         self.content = self.si.RetrieveContent()
 
-    def disconnect(self):
-        """Disconnect from vCenter."""
-        if self.si:
-            Disconnect(self.si)
-
     # ------------------------------------------------------------------
     # Lookups
     # ------------------------------------------------------------------

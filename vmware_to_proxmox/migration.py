@@ -103,6 +103,12 @@ class MigrationOrchestrator:
 
         self.backend.prepare(self._build_backend_context())
 
+        try:
+            return self._run_steps(vm, vm_name, start_time)
+        finally:
+            self.backend.finalize(self._build_backend_context())
+
+    def _run_steps(self, vm, vm_name: str, start_time: float) -> dict:
         steps = [
             (1, "Storage vMotion", self._step_1_storage_vmotion),
             (2, "Create Proxmox VM", self._step_2_create_proxmox_vm),

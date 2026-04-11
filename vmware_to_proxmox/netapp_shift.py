@@ -43,8 +43,8 @@ class NetAppShiftClient:
         client.connect()
         rg_id = client.create_resource_group(...)
         bp_id = client.create_blueprint(...)
-        client.trigger_migration(bp_id)
-        client.wait_for_migration(bp_id)
+        execution_id = client.trigger_conversion(bp_id)
+        client.wait_for_execution(execution_id)
         client.close()
     """
 
@@ -205,9 +205,6 @@ class NetAppShiftClient:
             f"(site={site_id}, virtEnv={virt_env_id})"
         )
 
-    def get_vm_id_by_name(self, site_id: str, virt_env_id: str, vm_name: str) -> str:
-        return self.get_unprotected_vm_by_name(site_id, virt_env_id, vm_name)["_id"]
-
     # ------------------------------------------------------------------
     # Resource group / blueprint creation
     # ------------------------------------------------------------------
@@ -359,16 +356,6 @@ class NetAppShiftClient:
     def get_resource_group_id_by_name(self, name: str) -> str | None:
         rg = self.get_resource_group_by_name(name)
         return rg.get("_id") if rg else None
-
-    def get_resource_group_vm_id(self, name: str) -> str | None:
-        """Return the first VM id stored on a resource group, for resume."""
-        rg = self.get_resource_group_by_name(name)
-        if not rg:
-            return None
-        vms = rg.get("vms") or []
-        if vms and isinstance(vms[0], dict):
-            return vms[0].get("_id")
-        return None
 
     def get_resource_group_detail(self, rg_id: str) -> dict:
         """Return the full resource group object by id."""
