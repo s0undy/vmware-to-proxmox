@@ -1,4 +1,4 @@
-"""NetApp Shift backend — implements steps 6-10 via the NetApp Shift REST API.
+"""NetApp Shift backend — implements steps 6-11 via the NetApp Shift REST API.
 
 Step 6 reuses the vCenter shutdown logic from ProxmoxNativeBackend. Steps 7-11
 orchestrate the NetApp Shift lifecycle:
@@ -15,9 +15,6 @@ Splitting the conversion (step 9) and the import (step 10) lets the
 operator rerun ``--skip-to 10`` after troubleshooting a failed
 conversion — or after performing the conversion manually — without
 re-triggering NetApp Shift.
-
-Moving the converted qcow2 into Proxmox is intentionally out of scope here —
-it will be wired up in a follow-up change.
 """
 
 import time
@@ -50,6 +47,18 @@ class NetAppShiftBackend(DiskMigrationBackend):
         self.client = NetAppShiftClient(self.shift_config)
         self.client.connect()
         ctx.log.info("  NetApp Shift backend ready.")
+
+    def finalize(self, ctx: BackendContext) -> None:
+        if self.client is not None:
+            try:
+                self.client.close()
+            except Exception as exc:
+                ctx.log.warning("  NetApp Shift logout failed: %s", exc)
+            self.client = None
+        try:
+            ctx.px.close_ssh()
+        except Exception as exc:
+            ctx.log.warning("  Proxmox SSH close failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Step 6 — vCenter shutdown (mirrors ProxmoxNativeBackend)
@@ -295,7 +304,7 @@ class NetAppShiftBackend(DiskMigrationBackend):
     # ------------------------------------------------------------------
 
     def step_11_verify(self, ctx: BackendContext, vm) -> None:
-        """Step 10 (NetApp Shift): verify VM is running with expected disks."""
+        """Step 11 (NetApp Shift): verify VM is running with expected disks."""
         from ..exceptions import ProxmoxOperationError
         from ..migration import VM_FULL_BOOT_SECONDS
 

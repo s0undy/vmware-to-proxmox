@@ -1,4 +1,4 @@
-"""Pluggable disk-migration backends for steps 6-10."""
+"""Pluggable disk-migration backends for steps 6-11."""
 
 from ..config import AppConfig
 from ..exceptions import ConfigurationError
