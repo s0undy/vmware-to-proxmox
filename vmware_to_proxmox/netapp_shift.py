@@ -405,12 +405,12 @@ class NetAppShiftClient:
     # Conversion execution + status
     # ------------------------------------------------------------------
     #
-    # NetApp Shift execution step status codes (observed):
-    #   0/1 = pending/queued, 2 = running, 3 = skipped / not-applicable,
-    #   4 = success. Anything else we treat as terminal too; the only
-    #   reliable failure signal we've seen is a truthy `error` field on
-    #   a step, so we use that to decide the overall result.
-    STEP_STATUS_IN_PROGRESS = (0, 1, 2)
+    # NetApp Shift execution step status codes:
+    #   0/1 = pending/queued, 2 = running, 3 = in progress, 4 = success.
+    # We require EVERY step to reach status=4 before treating the
+    # execution as complete — otherwise a multi-disk conversion can
+    # exit early while one disk is still at status=3.
+    STEP_STATUS_SUCCESS = 4
 
     def trigger_conversion(self, blueprint_id: str) -> str:
         """POST /api/recovery/bluePrint/{id}/convert/execution.
@@ -446,16 +446,18 @@ class NetAppShiftClient:
         poll_interval: int = 30,
         timeout: int = 14400,
     ) -> None:
-        """Poll execution steps until all finish, or raise on error/timeout.
+        """Poll execution steps until *every* step reaches status=4.
 
         A step is:
-          - *in progress* if ``status`` is in ``STEP_STATUS_IN_PROGRESS``;
           - *failed* if it carries a truthy ``error`` field;
-          - otherwise *terminal/done* (covers both "success" and
-            "skipped/not-applicable").
+          - *done* only if its ``status`` equals ``STEP_STATUS_SUCCESS`` (4);
+          - otherwise *still pending* — we keep polling.
 
-        The call returns once no step is in progress and no step reported
-        an error.
+        Strict status=4 matters for multi-disk conversions: if we returned
+        as soon as no step was in a known in-progress code, a per-disk
+        step that briefly reported an unrecognized status would let the
+        caller race ahead and start moving a disk that was still being
+        converted.
         """
         deadline = time.monotonic() + timeout
         last_desc = ""
@@ -473,25 +475,30 @@ class NetAppShiftClient:
                     f"NetApp Shift execution {execution_id} failed: {details}"
                 )
 
-            in_progress = [
+            pending = [
                 s for s in steps
-                if s.get("status") in self.STEP_STATUS_IN_PROGRESS
+                if s.get("status") != self.STEP_STATUS_SUCCESS
             ]
-            if steps and not in_progress:
+            if steps and not pending:
                 logger.info(
-                    "  NetApp Shift execution %s completed (%d steps).",
+                    "  NetApp Shift execution %s completed "
+                    "(%d steps, all status=4).",
                     execution_id, len(steps),
                 )
                 return
 
-            if in_progress:
-                current = in_progress[0]
+            if pending:
+                current = pending[0]
                 desc = (
                     f"{current.get('description', '')} "
                     f"(status={current.get('status')})"
                 )
                 if desc != last_desc:
-                    logger.info("  NetApp Shift execution step: %s", desc)
+                    logger.info(
+                        "  NetApp Shift execution step: %s "
+                        "(%d/%d steps at status=4)",
+                        desc, len(steps) - len(pending), len(steps),
+                    )
                     last_desc = desc
 
             if time.monotonic() >= deadline:
