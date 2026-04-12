@@ -11,12 +11,15 @@ However the method described in the Proxmox wiki is the manual way, and involves
 The code inside of this repo implements the [Attach Disk & Move Disk (minimal downtime)](https://pve.proxmox.com/wiki/Migrate_to_Proxmox_VE#Attach_Disk_&_Move_Disk_(minimal_downtime)) method from the Proxmox wiki as a base that can be used to migrate off VMware provided you have access to a shared NFS storage. Although I tried to keep it neutral I realise that the approach is highly opinionated and might not suit every environment. Feel free to clone and adapt the code to your needs.
 
 The base method has been used to migrate 80+ VMs from VMware to Proxmox, ranging from 20GB to 5TB in size.
-The Net App Shift Toolkit based version has migrated 10+ VMs, and has been tested 10+ times before that. It will in the upcoming months be used to migrate 100+ VMs.
+The Net App Shift Toolkit based version has been used to covnert 10+ drives and will in the upcoming months be used to migrate 100+ VMs.
 
 ## Notes about NetApp
 For those of you that have access to a NetApp Filer(NFS) I have good news. Utilizing [NetApp Shift Toolkit](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-overview.html#toolkit-overview) it is possible to reduce the migration time with by up to 99%. As an example migrating a 100GB VM using the base method would take about 12 minutes, with most of the time spent converting the disk. Using Shift to do the disk conversion the same migration only takes about 5 minutes. This is even more impactful for large VMs as a multi TB VM could take hours to convert. Using Shift it only takes about 1 minute to convert a 1TB VM from VMDK to QCOW2.
 
-NetApp have also created a full [Migrate VMs from VMware to Proxmox VE](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-migrate-esxi2proxmox.html) that does everything for you. As of writing this on 2026-04-12 I would advise against using it. It doesn't allow you to adjust many of the settings you want to set during the creation of the VM in Proxmox. As an example it doesn't support networks created by SDN, and it sets the machine type to i440fx making it a hassle to change after the VM has booted.
+NetApp have also created a full [Migrate VMs from VMware to Proxmox VE](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-migrate-esxi2proxmox.html) that does everything for you. 
+
+***As of writing this on 2026-04-12 I would advise against using the full NetApp Shift VMware -> Proxmox migration tool***
+It doesn't allow you to adjust many of the settings you want to set during the creation of the VM in Proxmox. As an example it doesn't support networks created by SDN, and it sets the machine type to i440fx making it a hassle to change after the VM has booted since doing so changes the machine configuration (e.g VM will lose network config and much more).
 
 Using only the Shift Toolkit API to convert the VMDK disk(s) to QCOW2 we can eliminate the step that takes the longest when doing the base migration. We also get the added benafit of not creating any big I/O on the storage since Shift uses FlexClones to do the conversion not requering any data copying. With this approach it's optional to use the NetApp Shift backend if you have access to it, if not the script will use a normal NFS volume.
 
@@ -156,4 +159,11 @@ The content in this folder has been heavily inspired by different community memb
 ## **Disclaimer** This project was built with assistance from AI.
 AI makes mistakes... and so do humans. If you intend to use this in a production environment please do your own code review(by human hands). Always have working backups in place before migrating and ensure that they work. Have a plan on how to rollback if something somewhere goes wrong.
 
-It is what it is. C'est la vie!
+## **Disclaimer v2**
+The project might contain bugs. It has been used to migrate real workloads with good result. Sometimes things happen that is outside the control of the hypervisor hosts(e.g Windows deciding to timeout during service starts) and this might cause the script to fail. Before running it on your own production workload do trial runs to get familiar with the syntax, try exiting early to test out how to start from the middle using --skip-to X
+
+YMMV & DYODD - Your mileage may vary, Do your own due diligence
+
+*C'est la vie!*
+
+*It is what it is.*
