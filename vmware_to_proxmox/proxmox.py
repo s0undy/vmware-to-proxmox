@@ -123,8 +123,7 @@ class ProxmoxClient:
 
         # NetApp Shift converts the disks outside Proxmox and imports the
         # finished qcow2 images in a later step, so the VM shell must be
-        # created without any data disks (and without a scsi0 boot hint —
-        # there is no scsi0 yet).
+        # created without any data disks (and without a scsi0 boot device)
         skip_data_disks = (
             migration_config.disk_conversion_backend == "netapp-shift"
         )

@@ -39,17 +39,7 @@ SESSION_HEADER = "netapp-sie-sessionid"
 
 
 class NetAppShiftClient:
-    """Thin REST client for the NetApp Shift API.
-
-    Usage:
-        client = NetAppShiftClient(config)
-        client.connect()
-        rg_id = client.create_resource_group(...)
-        bp_id = client.create_blueprint(...)
-        execution_id = client.trigger_conversion(bp_id)
-        client.wait_for_execution(execution_id)
-        client.close()
-    """
+    """Thin REST client for the NetApp Shift API."""
 
     def __init__(self, config: NetAppShiftConfig):
         self.config = config
@@ -174,7 +164,7 @@ class NetAppShiftClient:
     def discover_source(self, site_id: str, virt_env_id: str) -> None:
         """Kick off a source-site discovery.
 
-        Fire-and-forget: NetApp Shift accepts an empty POST and starts
+        NetApp Shift accepts an empty POST and starts
         refreshing its inventory of the source virtualization environment.
         Callers should wait a few seconds before reading the unprotected
         VM list so that the refresh has time to settle.

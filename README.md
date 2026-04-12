@@ -18,7 +18,11 @@ For those of you that have access to a NetApp Filer(NFS) I have good news. Utili
 
 NetApp have also created a full [Migrate VMs from VMware to Proxmox VE](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-migrate-esxi2proxmox.html) that does everything for you. As of writing this on 2026-04-12 I would advise against using it. It doesn't allow you to adjust many of the settings you want to set during the creation of the VM in Proxmox. As an example it doesn't support networks created by SDN, and it sets the machine type to i440fx making it a hassle to change after the VM has booted.
 
-I decided to use the Shift Toolkit to convert the VMDK to QCOW, eliminating much of the time as well as having close to zero impact on the storage system's performance during the migration. It was then easy to use the already written plumbing to finalize the migration.
+Using only the Shift Toolkit API to convert the VMDK disk(s) to QCOW2 we can eliminate the step that takes the longest when doing the base migration. We also get the added benafit of not creating any big I/O on the storage since Shift uses FlexClones to do the conversion not requering any data copying. With this approach it's optional to use the NetApp Shift backend if you have access to it, if not the script will use a normal NFS volume.
+
+## Notes about Proxmox native ESXi import
+
+While the native ESXi import works fine for most cases it has many limitations, mostly due to how the ESXI API functions. The rate limiting and lack of parallelization makes imports slow, and anoying to automate. It is also not possible to use if you are running a vSAN.
 
 ## Migration steps
 
@@ -26,7 +30,7 @@ The migration is done in 15 distinct steps. When using NetApp Shift backend step
 
 1. Storage vMotion VM to a shared datastore
 2. VM creation in Proxmox
-3. NIC configuration export
+3. NIC configuration export   
 4. Enablement of VirtIO SCSI boot driver 
 5. Installation of VirtIO guest tools
 6. Shutdown of the VM
@@ -40,6 +44,24 @@ The migration is done in 15 distinct steps. When using NetApp Shift backend step
 14. Restore NIC configuration
 15. Enable NICs and do a final reboot
 
+If using NetApp shift the steps looks like this instead.
+
+1. Storage vMotion VM to a shared datastore
+2. VM creation in Proxmox
+3. NIC configuration export   
+4. Enablement of VirtIO SCSI boot driver 
+5. Installation of VirtIO guest tools
+6. Shutdown of the VM
+7. Create Resource group for the VM in NetApp Shift
+8. Create Blueprint referencing the Resource group
+9. Trigger a disk conversion using the Blueprint and wait for it to finish
+10. Move converted QCOW2 disks into correct VM directory, if VM uses OVMF create a efidisk and boot up the VM.
+11. Verify VM is running on final storage
+12. Install VirtIO drivers from ISO via QEMU guest agent
+13. Purge VMware Tools
+14. Restore NIC configuration
+15. Enable NICs and do a final reboot
+
 
 ## Requirements
 - Python 3.10+ on the host running the migration
@@ -47,6 +69,17 @@ The migration is done in 15 distinct steps. When using NetApp Shift backend step
 - VirtIO drivers and guest tools staged in the guest (`C:\TMP\pveMigration\`)
 - PowerShell scripts (`exportNicConfig.ps1`, `enable-vioscsi-to-load-on-boot.ps1`, `importNicConfig.ps1`, `purge-vmware-tools.ps1`) in the same directory
 - VirtIO ISO uploaded to Proxmox storage
+- The same NFS volume mounted on both Proxmox and in vCenter. (Can be a temporary migration volume)
+- A "final" destination volume in Proxmox.
+
+## Additional requirements when utilizing NetApp Shift Toolkit
+- A server running [NetApp Shift Toolkit](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-install-prepare.html#before-you-begin
+) that has access to the PVE API, vCenter and ONTAP API
+- vCenter setup as a source site inside Shift
+- All ONTAP arrays that will be used added as storage to vCenter inside Shift
+- KVM(Conversion) setup as a source destination inside Shift
+- NFS volume mounted on Proxmox
+- The same NFS volume, but with a qtree, mounted inside vCenter.
 
 ## Install
 
@@ -110,7 +143,6 @@ Sequential by default. Use `--parallel` for concurrent migration.
 # Known issues
 
 - See [Issues](https://github.com/s0undy/vmware-to-proxmox/issues)
-- When using the base method high random write I/O can be observed during the disk move/conversion from VMDK to QCOW2 on the final storage. Depending on what storage you are using this MIGHT cause latency. This seems to be a problem on NFSv3, works better on NFSv4.2 for reasons I cannot explain.
 
 # Credits
 The content in this folder has been heavily inspired by different community members. I want to say thank you for making the initial scripts public. They have been modified to fit the workflow of this project.
@@ -121,5 +153,7 @@ The content in this folder has been heavily inspired by different community memb
 - NetApp for their Shift Toolkit as well as the examples over at [shift-api-automation](https://github.com/NetApp/shift-api-automation) (Worth mentioning that these are not updated and I had to reverse engineer parts of the API in order to get it working...)
 
 
-## This project was built with assistance from AI.
-All code has been read by a human. AI makes mistakes... and so do humans. If you intend to use this in a production environment please do your own code review(by human hands).
+## **Disclaimer** This project was built with assistance from AI.
+AI makes mistakes... and so do humans. If you intend to use this in a production environment please do your own code review(by human hands). Always have working backups in place before migrating and ensure that they work. Have a plan on how to rollback if something somewhere goes wrong.
+
+It is what it is. C'est la vie!

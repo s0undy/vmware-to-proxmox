@@ -158,7 +158,7 @@ class MigrationOrchestrator:
                     self.log.warning("  You can add it manually: ha-manager add vm:%d", vmid)
 
         # Query guest agent for primary IP address (skip when HA is enabled
-        # because Proxmox may migrate the VM to another node after enrollment).
+        # because Proxmox may migrate the VM to another node after enrollment)
         ip_address = None
         if not self.dry_run and not self.config.migration.enable_ha:
             vmid = self._resolve_vmid()

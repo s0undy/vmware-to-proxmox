@@ -5,7 +5,6 @@
 #
 # Passwords can also be set via environment variables:
 #   VCENTER_PASSWORD, PROXMOX_PASSWORD, GUEST_PASSWORD
-# If omitted entirely, you will be prompted interactively.
 
 # ---------------------------------------------------------------------------
 # vCenter connection
@@ -13,7 +12,7 @@
 vcenter:
   host: "vcenter.example.com"       # --vcenter-host
   user: "administrator@vsphere.local" # --vcenter-user
-  password: ""                       # --vcenter-password  (or VCENTER_PASSWORD env var)
+  password: ""                       # --vcenter-password
   port: 443                          # --vcenter-port
   insecure: true                     # --vcenter-insecure  (skip SSL verification)
 
@@ -23,17 +22,13 @@ vcenter:
 proxmox:
   host: "proxmox.example.com"       # --proxmox-host
   user: "root@pam"                   # --proxmox-user
-  password: ""                       # --proxmox-password  (or PROXMOX_PASSWORD env var)
+  password: ""                       # --proxmox-password
   node: "pve"                        # --proxmox-node
   port: 8006                         # --proxmox-port
   verify_ssl: false                  # --proxmox-verify-ssl
-  # SSH access (for VMDK descriptor rewriting on the Proxmox node):
+  # SSH access to PVE
   # ssh_user: "root"                 # --proxmox-ssh-user  (default: API user without realm)
   # ssh_port: 22                     # --proxmox-ssh-port  (default: 22)
-  # Token auth (alternative to password):
-  # token_name: "migrate"            # --proxmox-token-name
-  # token_value: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # --proxmox-token-value
-
 # ---------------------------------------------------------------------------
 # Guest OS credentials (for running scripts inside the VM via VMware Tools)
 # Optional when os_type is "other" (no guest operations needed for appliances).
@@ -59,6 +54,7 @@ migration:
 
   # NIC bridges — comma-separated, mapped to NICs in order.
   # If fewer bridges than NICs, the last bridge is reused.
+  # Also supports SDN bridges.
   # Example: "vmbr0,vmbr1" with 3 NICs → net0=vmbr0, net1=vmbr1, net2=vmbr1
   proxmox_bridges: "vmbr0"          # --proxmox-bridges  (shared default, overridable per VM)
 
@@ -68,9 +64,9 @@ migration:
   max_cores: 0                       # --max-cores    (0 = use vCenter vCPU count as-is)
   max_sockets: 1                     # --max-sockets  (default: 1)
 
-  # Paths inside the guest (pre-deployed by user):
+  # Paths inside the guest (Predeploy these before starting migration):
   staging_dir: "C:\\TMP\\pveMigration"                                          # --staging-dir
-  virtio_driver_path: "C:\\TMP\\pveMigration\\vioscsi"                          # --virtio-driver-path
+  virtio_driver_path: "C:\\TMP\\pveMigration\\vioscsi"                          # --virtio-driver-path ONLY vioscsi driver is needed here.
   virtio_tools_path: "C:\\TMP\\pveMigration\\virtio-win-guest-tools.exe"        # --virtio-tools-path
   export_nic_script: "C:\\TMP\\pveMigration\\exportNicConfig.ps1"               # --export-nic-script
   vioscsi_script: "C:\\TMP\\pveMigration\\enable-vioscsi-to-load-on-boot.ps1"   # --vioscsi-script
@@ -104,9 +100,6 @@ migration:
   # overridden per VM. Guest credentials (guest_user, guest_password) can
   # also be overridden per VM; unset fields fall back to the shared defaults.
   #
-  # Single-VM shorthand (backward compatible):
-  #   vm_name: "my-vm"
-  #   proxmox_vmid: 0
   # ---------------------------------------------------------------------------
   vms:
     - vm_name: ""                    # required
