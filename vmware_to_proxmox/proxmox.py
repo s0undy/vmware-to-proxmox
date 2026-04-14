@@ -203,6 +203,19 @@ class ProxmoxClient:
             ) from exc
         logger.info("  Start command sent for VMID %d", vmid)
 
+    def _wait_for_file(self, path: str, timeout: int = 120) -> None:
+        """Block until a file exists on the SSH host, polling every 2s."""
+        start = time.monotonic()
+        while True:
+            if time.monotonic() - start > timeout:
+                raise ProxmoxOperationError(
+                    f"File not found after {timeout}s: {path}"
+                )
+            _, _, rc = self._ssh_run(f"test -f {shlex.quote(path)}", check=False)
+            if rc == 0:
+                return
+            time.sleep(2)
+
     def _wait_for_config_unlock(self, vmid: int, timeout: int = 120) -> None:
         """Block until the VM config lock is released by Proxmox."""
         node = self.config.node
@@ -353,6 +366,12 @@ class ProxmoxClient:
             #    config lock to clear between each call.
             logger.info("  Attaching %d disk(s) to VMID %d ...", num_disks, vmid)
             for i in range(num_disks):
+                dest_path = f"{dest_dir}/vm-{vmid}-disk-{i}.qcow2"
+                logger.info(
+                    "    [%d/%d] Verifying %s is accessible ...",
+                    i + 1, num_disks, dest_path,
+                )
+                self._wait_for_file(dest_path)
                 logger.info("    [%d/%d] Attaching scsi%d ...", i + 1, num_disks, i)
                 try:
                     self.api.nodes(node).qemu(vmid).config.post(**{
