@@ -216,6 +216,26 @@ class ProxmoxClient:
                 return
             time.sleep(2)
 
+    def _wait_for_qemu_img(self, path: str, timeout: int = 300) -> None:
+        """Block until qemu-img info succeeds on the file, polling every 5s.
+
+        This confirms the disk is fully accessible on the storage system,
+        not just visible in the directory listing.
+        """
+        start = time.monotonic()
+        while True:
+            if time.monotonic() - start > timeout:
+                raise ProxmoxOperationError(
+                    f"qemu-img info did not succeed after {timeout}s: {path}"
+                )
+            _, _, rc = self._ssh_run(
+                f"qemu-img info {shlex.quote(path)}", check=False
+            )
+            if rc == 0:
+                return
+            logger.info("      qemu-img info not ready yet, retrying in 5s ...")
+            time.sleep(5)
+
     def wait_for_task(self, task_upid: str, timeout: int = 3600) -> None:
         """Poll a Proxmox task until it completes or times out."""
         node = self.config.node
@@ -359,10 +379,15 @@ class ProxmoxClient:
                 )
                 self._wait_for_file(dest_path)
                 logger.info(
-                    "    [%d/%d] File confirmed, waiting 10s before attaching ...",
+                    "    [%d/%d] File visible, waiting 30s for storage to settle ...",
                     i + 1, num_disks,
                 )
-                time.sleep(10)
+                time.sleep(30)
+                logger.info(
+                    "    [%d/%d] Verifying disk is readable via qemu-img info ...",
+                    i + 1, num_disks,
+                )
+                self._wait_for_qemu_img(dest_path)
                 logger.info("    [%d/%d] Attaching scsi%d ...", i + 1, num_disks, i)
                 disk_value = (
                     f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
