@@ -372,6 +372,11 @@ class ProxmoxClient:
                     i + 1, num_disks, dest_path,
                 )
                 self._wait_for_file(dest_path)
+                logger.info(
+                    "    [%d/%d] File confirmed, waiting 10s before attaching ...",
+                    i + 1, num_disks,
+                )
+                time.sleep(10)
                 logger.info("    [%d/%d] Attaching scsi%d ...", i + 1, num_disks, i)
                 try:
                     self.api.nodes(node).qemu(vmid).config.post(**{
