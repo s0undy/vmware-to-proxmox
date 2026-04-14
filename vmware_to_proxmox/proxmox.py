@@ -294,13 +294,7 @@ class ProxmoxClient:
             self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_dir)}")
             self._ssh_run(f"chmod 0740 {shlex.quote(dest_dir)}")
 
-            # 2. Ensure the source directory is traversable and writable
-            #    by the NFS-squashed user (nobody) so that mv can unlink
-            #    the source entry.  NetApp Shift may create the directory
-            #    without owner execute/write bits (e.g. drw-r--r--).
-            self._ssh_run(f"chmod 0750 {shlex.quote(source_dir)}")
-
-            # 3. Move + rename each disk (idempotent).
+            # 2. Move + rename each disk (idempotent).
             for i in range(num_disks):
                 src_name = f"{vm_name}.qcow2" if i == 0 else f"{vm_name}_{i}.qcow2"
                 dest_name = f"vm-{vmid}-disk-{i}.qcow2"
@@ -341,7 +335,7 @@ class ProxmoxClient:
                 self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_path)}")
                 self._ssh_run(f"chmod 0640 {shlex.quote(dest_path)}")
 
-            # 4. Attach qcow2 disks to the VM and set boot order.
+            # 3. Attach qcow2 disks to the VM and set boot order.
             config_params: dict = {}
             for i in range(num_disks):
                 config_params[f"scsi{i}"] = (
@@ -358,7 +352,7 @@ class ProxmoxClient:
                     f"Failed to attach imported disks to VM {vmid}: {exc}"
                 ) from exc
 
-            # 5. Allocate efidisk0 last for OVMF, so it gets the highest
+            # 4. Allocate efidisk0 last for OVMF, so it gets the highest
             #    disk-N number in the images directory.
             if firmware == "efi":
                 logger.info("  Allocating efidisk0 on %s ...", final_storage)
