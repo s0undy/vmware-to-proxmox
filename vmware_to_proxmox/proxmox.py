@@ -348,8 +348,8 @@ class ProxmoxClient:
                 self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_path)}")
                 self._ssh_run(f"chmod 0640 {shlex.quote(dest_path)}")
 
-            # 3. Attach qcow2 disks to the VM one at a time, waiting for the
-            #    config lock to clear between each call.
+            # 3. Attach qcow2 disks to the VM one at a time via SSH (qm set),
+            #    which avoids the qemu-img info hang that occurs through the API.
             logger.info("  Attaching %d disk(s) to VMID %d ...", num_disks, vmid)
             for i in range(num_disks):
                 dest_path = f"{dest_dir}/vm-{vmid}-disk-{i}.qcow2"
@@ -364,44 +364,28 @@ class ProxmoxClient:
                 )
                 time.sleep(10)
                 logger.info("    [%d/%d] Attaching scsi%d ...", i + 1, num_disks, i)
-                try:
-                    upid = self.api.nodes(node).qemu(vmid).config.post(**{
-                        f"scsi{i}": (
-                            f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
-                            "ssd=1,discard=on,iothread=1"
-                        )
-                    })
-                except Exception as exc:
-                    raise ProxmoxOperationError(
-                        f"Failed to attach disk scsi{i} to VM {vmid}: {exc}"
-                    ) from exc
-                self.wait_for_task(upid)
+                disk_value = (
+                    f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
+                    "ssd=1,discard=on,iothread=1"
+                )
+                self._ssh_run(
+                    f"qm set {vmid} --scsi{i} {shlex.quote(disk_value)}"
+                )
 
             logger.info("  Setting boot order for VMID %d ...", vmid)
-            try:
-                upid = self.api.nodes(node).qemu(vmid).config.post(boot="order=scsi0")
-            except Exception as exc:
-                raise ProxmoxOperationError(
-                    f"Failed to set boot order for VM {vmid}: {exc}"
-                ) from exc
-            self.wait_for_task(upid)
+            self._ssh_run(f"qm set {vmid} --boot order=scsi0")
 
             # 4. Allocate efidisk0 last for OVMF, so it gets the highest
             #    disk-N number in the images directory.
             if firmware == "efi":
                 logger.info("  Allocating efidisk0 on %s ...", final_storage)
-                try:
-                    upid = self.api.nodes(node).qemu(vmid).config.post(
-                        efidisk0=(
-                            f"{final_storage}:1,format=qcow2,"
-                            "efitype=4m,pre-enrolled-keys=1"
-                        ),
-                    )
-                except Exception as exc:
-                    raise ProxmoxOperationError(
-                        f"Failed to allocate efidisk0 for VM {vmid}: {exc}"
-                    ) from exc
-                self.wait_for_task(upid)
+                efi_value = (
+                    f"{final_storage}:1,format=qcow2,"
+                    "efitype=4m,pre-enrolled-keys=1"
+                )
+                self._ssh_run(
+                    f"qm set {vmid} --efidisk0 {shlex.quote(efi_value)}"
+                )
 
             logger.info("  Disk import complete for VMID %d.", vmid)
         finally:
