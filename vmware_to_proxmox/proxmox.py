@@ -203,6 +203,20 @@ class ProxmoxClient:
             ) from exc
         logger.info("  Start command sent for VMID %d", vmid)
 
+    def _wait_for_config_unlock(self, vmid: int, timeout: int = 120) -> None:
+        """Block until the VM config lock is released by Proxmox."""
+        node = self.config.node
+        start = time.monotonic()
+        while True:
+            if time.monotonic() - start > timeout:
+                raise ProxmoxOperationError(
+                    f"VM {vmid} config lock not released within {timeout}s"
+                )
+            cfg = self.api.nodes(node).qemu(vmid).config.get()
+            if "lock" not in cfg:
+                return
+            time.sleep(2)
+
     def wait_for_task(self, task_upid: str, timeout: int = 3600) -> None:
         """Poll a Proxmox task until it completes or times out."""
         node = self.config.node
@@ -335,22 +349,32 @@ class ProxmoxClient:
                 self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_path)}")
                 self._ssh_run(f"chmod 0640 {shlex.quote(dest_path)}")
 
-            # 3. Attach qcow2 disks to the VM and set boot order.
-            config_params: dict = {}
-            for i in range(num_disks):
-                config_params[f"scsi{i}"] = (
-                    f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
-                    "ssd=1,discard=on,iothread=1"
-                )
-            config_params["boot"] = "order=scsi0"
-
+            # 3. Attach qcow2 disks to the VM one at a time, waiting for the
+            #    config lock to clear between each call.
             logger.info("  Attaching %d disk(s) to VMID %d ...", num_disks, vmid)
+            for i in range(num_disks):
+                logger.info("    [%d/%d] Attaching scsi%d ...", i + 1, num_disks, i)
+                try:
+                    self.api.nodes(node).qemu(vmid).config.post(**{
+                        f"scsi{i}": (
+                            f"{final_storage}:{vmid}/vm-{vmid}-disk-{i}.qcow2,"
+                            "ssd=1,discard=on,iothread=1"
+                        )
+                    })
+                except Exception as exc:
+                    raise ProxmoxOperationError(
+                        f"Failed to attach disk scsi{i} to VM {vmid}: {exc}"
+                    ) from exc
+                self._wait_for_config_unlock(vmid)
+
+            logger.info("  Setting boot order for VMID %d ...", vmid)
             try:
-                self.api.nodes(node).qemu(vmid).config.post(**config_params)
+                self.api.nodes(node).qemu(vmid).config.post(boot="order=scsi0")
             except Exception as exc:
                 raise ProxmoxOperationError(
-                    f"Failed to attach imported disks to VM {vmid}: {exc}"
+                    f"Failed to set boot order for VM {vmid}: {exc}"
                 ) from exc
+            self._wait_for_config_unlock(vmid)
 
             # 4. Allocate efidisk0 last for OVMF, so it gets the highest
             #    disk-N number in the images directory.
@@ -367,6 +391,7 @@ class ProxmoxClient:
                     raise ProxmoxOperationError(
                         f"Failed to allocate efidisk0 for VM {vmid}: {exc}"
                     ) from exc
+                self._wait_for_config_unlock(vmid)
 
             logger.info("  Disk import complete for VMID %d.", vmid)
         finally:
