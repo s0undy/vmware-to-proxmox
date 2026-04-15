@@ -77,9 +77,18 @@ class OSHandler(ABC):
         ctx.log.info("  Guest agent is responding.")
 
     def _reboot_and_wait(self, ctx: "StepContext", pre_seconds: int, post_seconds: int) -> None:
-        """Reboot the VM with pre/post wait periods."""
+        """Reboot the VM and verify it comes back up.
+
+        After issuing the reboot command, waits a short period for the
+        reboot to initiate (the VM needs time to begin shutting down),
+        then polls Proxmox until the VM is reported as running again.
+        """
+        from ..migration import REBOOT_INITIATION_SECONDS
+
         ctx.log.info("  Waiting %ds before reboot ...", ctx.effective_wait(pre_seconds))
         ctx.sleep_fn(pre_seconds)
         ctx.px.reboot_vm(ctx.vmid)
-        ctx.log.info("  Waiting %ds for VM to boot ...", ctx.effective_wait(post_seconds))
-        ctx.sleep_fn(post_seconds)
+        ctx.log.info("  Reboot issued. Waiting %ds for reboot to initiate ...",
+                      ctx.effective_wait(REBOOT_INITIATION_SECONDS))
+        ctx.sleep_fn(REBOOT_INITIATION_SECONDS)
+        ctx.wait_for_vm_ready(ctx.vmid, settle_seconds=post_seconds)
