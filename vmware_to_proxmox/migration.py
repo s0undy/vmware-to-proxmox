@@ -33,6 +33,8 @@ ISO_MOUNT_WAIT_SECONDS = 5         # ISO availability after mount
 PRE_REBOOT_PAUSE_SECONDS = 10      # Grace period before reboot (step 13)
 POST_REBOOT_BOOT_SECONDS = 40      # Boot after reboot (steps 13, 14)
 NIC_RESTORE_PRE_REBOOT_SECONDS = 15  # Grace period before reboot (step 14)
+REBOOT_INITIATION_SECONDS = 15     # Delay before polling after reboot command
+PRE_FINALIZE_SETTLE_SECONDS = 15   # Extra settle time before step 15
 VM_READY_TIMEOUT_SECONDS = 300     # Max wait for VM to reach 'running'
 VM_READY_POLL_SECONDS = 5          # Poll interval for VM ready check
 
@@ -320,6 +322,12 @@ class MigrationOrchestrator:
         if self.dry_run:
             self.log.info("  DRY RUN: would unmount ISO, clean up unused disks, enable NICs, and reboot VMID %d", vmid)
             return
+
+        # Extra settle time to ensure the VM config lock is released after
+        # the reboot issued in step 14.
+        self.log.info("  Waiting %ds for VM to fully settle ...",
+                      self._effective_wait(PRE_FINALIZE_SETTLE_SECONDS))
+        self._sleep(PRE_FINALIZE_SETTLE_SECONDS)
 
         # Unmount the VirtIO ISO
         self.px.unmount_iso(vmid)
