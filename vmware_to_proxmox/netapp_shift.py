@@ -212,11 +212,17 @@ class NetAppShiftClient:
         dest_virt_env_id: str,
         vm_id: str,
         vm_name: str,
+        vmid: int,
         datastore_name: str,
         volume_name: str,
-        qtree_name: str,
         boot_order: int = 3,
     ) -> str:
+        # Using a "custom" qtree with an explicit volumePath tells NetApp
+        # Shift to write the converted qcow2 files directly into the
+        # Proxmox dir-storage layout (/mnt/pve/{datastore}/images/{vmid}/).
+        # The caller must have created that directory on the Proxmox node
+        # before this payload is submitted.
+        volume_path = f"/vol/{volume_name}/images/{vmid}"
         body = {
             "name": name,
             "sourceSite": {"_id": source_site_id},
@@ -235,9 +241,9 @@ class NetAppShiftClient:
                 "datastoreQtreeMapping": [
                     {
                         "datastoreName": datastore_name,
-                        "qtreeName": qtree_name,
+                        "qtreeName": "custom",
                         "volumeName": volume_name,
-                        "volumePath": "",
+                        "volumePath": volume_path,
                     }
                 ],
                 "targetDatastore": {"_id": datastore_name},

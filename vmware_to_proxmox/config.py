@@ -80,7 +80,6 @@ class MigrationConfig:
     netapp_source_site: str = ""
     netapp_destination_site: str = ""
     netapp_destination_volume: str = ""
-    netapp_destination_qtree: str = ""
 
 
 _MIGRATION_FIELD_NAMES = {f.name for f in fields(MigrationConfig)}
@@ -287,9 +286,6 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     netapp_destination_volume = _pick(
         args.netapp_destination_volume, mig_yaml.get("netapp_destination_volume"), "",
     )
-    netapp_destination_qtree = _pick(
-        args.netapp_destination_qtree, mig_yaml.get("netapp_destination_qtree"), "",
-    )
 
     # ------------------------------------------------------------------
     # NetApp Shift (only required when backend is "netapp-shift")
@@ -374,7 +370,6 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         netapp_source_site=netapp_source_site,
         netapp_destination_site=netapp_destination_site,
         netapp_destination_volume=netapp_destination_volume,
-        netapp_destination_qtree=netapp_destination_qtree,
     )
 
     app_configs: list[AppConfig] = []
@@ -399,7 +394,6 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
                     ("netapp_source_site", vm_migration.netapp_source_site),
                     ("netapp_destination_site", vm_migration.netapp_destination_site),
                     ("netapp_destination_volume", vm_migration.netapp_destination_volume),
-                    ("netapp_destination_qtree", vm_migration.netapp_destination_qtree),
                     ("proxmox_final_storage", vm_migration.proxmox_final_storage),
                 )
                 if not value
