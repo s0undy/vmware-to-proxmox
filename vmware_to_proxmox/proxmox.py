@@ -380,12 +380,8 @@ class ProxmoxClient:
                 )
                 self._wait_for_file(dest_path)
                 logger.info(
-                    "    [%d/%d] File visible, waiting 30s for storage to settle ...",
-                    i + 1, num_disks,
-                )
-                time.sleep(30)
-                logger.info(
-                    "    [%d/%d] Verifying disk is readable via qemu-img info ...",
+                    "    [%d/%d] File visible, verifying disk is readable "
+                    "via qemu-img info ...",
                     i + 1, num_disks,
                 )
                 self._wait_for_qemu_img(dest_path)

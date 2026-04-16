@@ -425,15 +425,11 @@ class NetAppShiftClient:
         )
         return payload.get("type", ""), payload.get("steps") or []
 
-    # Number of consecutive "all status=4 with stable step count" polls
-    # required before we treat the execution as complete. Defends against
-    # the steps list growing mid-execution: e.g. disk 1's per-disk step
-    # might already be at status=4 in poll N while disk 2's per-disk step
-    # has not yet been added to the list — declaring done at that point
-    # would race the orchestrator into step 10 against an in-flight
-    # conversion. Requiring N consecutive stable polls forces NetApp Shift
-    # to publish a steady-state list before we trust it.
-    EXECUTION_STABLE_POLLS = 3
+    # Seconds to wait before re-checking after the first "all status=4"
+    # poll. A single confirmation poll defends against the tiny window
+    # where NetApp Shift has marked existing steps done but has not yet
+    # added the next per-disk step.
+    EXECUTION_CONFIRM_SECONDS = 5
 
     def wait_for_execution(
         self,
@@ -442,24 +438,20 @@ class NetAppShiftClient:
         poll_interval: int = 30,
         timeout: int = 14400,
     ) -> None:
-        """Poll execution steps until every step has reached status=4
-        and the step list has been stable across several consecutive polls.
+        """Poll execution steps until every step has reached status=4.
 
         A step is:
           - *failed* if it carries a truthy ``error`` field;
           - *done* only if its ``status`` equals ``STEP_STATUS_SUCCESS`` (4);
           - otherwise *still pending* — we keep polling.
 
-        We additionally require the step count to remain unchanged for
-        ``EXECUTION_STABLE_POLLS`` consecutive polls of "all done" before
-        returning, because NetApp Shift adds per-disk steps to the list
-        as the conversion progresses; a poll that catches the list
-        mid-grow would otherwise let us bail too early on multi-disk VMs.
+        Once a poll reports "all done", we wait ``EXECUTION_CONFIRM_SECONDS``
+        and re-check. If the second poll also reports "all done", the
+        execution is considered complete; otherwise we resume normal
+        polling.
         """
         deadline = time.monotonic() + timeout
         last_desc = ""
-        stable_polls = 0
-        last_count = -1
         while True:
             _, steps = self.get_execution_steps(execution_id)
 
@@ -479,48 +471,60 @@ class NetAppShiftClient:
                 s.get("status") == self.STEP_STATUS_SUCCESS for s in steps
             )
 
-            if all_done and count == last_count:
-                stable_polls += 1
+            if all_done:
                 logger.info(
-                    "  NetApp Shift execution %s: all %d steps at status=4 "
-                    "(stable %d/%d)",
-                    execution_id, count, stable_polls, self.EXECUTION_STABLE_POLLS,
+                    "  NetApp Shift execution %s: all %d steps at status=4, "
+                    "re-checking in %ds ...",
+                    execution_id, count, self.EXECUTION_CONFIRM_SECONDS,
                 )
-                if stable_polls >= self.EXECUTION_STABLE_POLLS:
+                time.sleep(self.EXECUTION_CONFIRM_SECONDS)
+
+                _, confirm_steps = self.get_execution_steps(execution_id)
+                confirm_failed = [s for s in confirm_steps if s.get("error")]
+                if confirm_failed:
+                    details = "; ".join(
+                        f"{s.get('description', '?')} "
+                        f"(status={s.get('status')}, error={s.get('error')})"
+                        for s in confirm_failed
+                    )
+                    raise NetAppShiftError(
+                        f"NetApp Shift execution {execution_id} failed: {details}"
+                    )
+                confirm_done = bool(confirm_steps) and all(
+                    s.get("status") == self.STEP_STATUS_SUCCESS
+                    for s in confirm_steps
+                )
+                if confirm_done:
                     logger.info(
                         "  NetApp Shift execution %s completed "
                         "(%d steps, all status=4).",
-                        execution_id, count,
+                        execution_id, len(confirm_steps),
                     )
                     return
-            else:
-                if all_done:
-                    logger.info(
-                        "  NetApp Shift execution %s: all %d steps at status=4 "
-                        "(step count changed %d -> %d, restarting stability "
-                        "counter)",
-                        execution_id, count, last_count, count,
-                    )
-                stable_polls = 0
-                pending = [
-                    s for s in steps
-                    if s.get("status") != self.STEP_STATUS_SUCCESS
-                ]
-                if pending:
-                    current = pending[0]
-                    desc = (
-                        f"{current.get('description', '')} "
-                        f"(status={current.get('status')})"
-                    )
-                    if desc != last_desc:
-                        logger.info(
-                            "  NetApp Shift execution step: %s "
-                            "(%d/%d steps at status=4)",
-                            desc, count - len(pending), count,
-                        )
-                        last_desc = desc
+                logger.info(
+                    "  NetApp Shift execution %s: re-check found new pending "
+                    "work, resuming normal polling.",
+                    execution_id,
+                )
+                steps = confirm_steps
 
-            last_count = count
+            pending = [
+                s for s in steps
+                if s.get("status") != self.STEP_STATUS_SUCCESS
+            ]
+            if pending:
+                current = pending[0]
+                desc = (
+                    f"{current.get('description', '')} "
+                    f"(status={current.get('status')})"
+                )
+                if desc != last_desc:
+                    logger.info(
+                        "  NetApp Shift execution step: %s "
+                        "(%d/%d steps at status=4)",
+                        desc, len(steps) - len(pending), len(steps),
+                    )
+                    last_desc = desc
 
             if time.monotonic() >= deadline:
                 raise NetAppShiftError(
