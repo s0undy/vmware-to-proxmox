@@ -79,16 +79,19 @@ class OSHandler(ABC):
     def _reboot_and_wait(self, ctx: "StepContext", pre_seconds: int, post_seconds: int) -> None:
         """Reboot the VM and verify it comes back up.
 
-        After issuing the reboot command, waits a short period for the
-        reboot to initiate (the VM needs time to begin shutting down),
-        then polls Proxmox until the VM is reported as running again.
+        Proxmox reports the VM as 'running' throughout an in-guest reboot,
+        so we detect the reboot via the QEMU guest agent: it must go offline
+        (OS shutting down) and then come back (OS fully up).
         """
-        from ..migration import REBOOT_INITIATION_SECONDS
+        from ..migration import REBOOT_OFFLINE_TIMEOUT_SECONDS
 
         ctx.log.info("  Waiting %ds before reboot ...", ctx.effective_wait(pre_seconds))
         ctx.sleep_fn(pre_seconds)
         ctx.px.reboot_vm(ctx.vmid)
-        ctx.log.info("  Reboot issued. Waiting %ds for reboot to initiate ...",
-                      ctx.effective_wait(REBOOT_INITIATION_SECONDS))
-        ctx.sleep_fn(REBOOT_INITIATION_SECONDS)
-        ctx.wait_for_vm_ready(ctx.vmid, settle_seconds=post_seconds)
+        ctx.log.info("  Reboot issued. Waiting for guest agent to go offline ...")
+        ctx.px.wait_for_guest_agent_offline(ctx.vmid, timeout=REBOOT_OFFLINE_TIMEOUT_SECONDS)
+        ctx.log.info("  Guest agent offline — reboot in progress. Waiting for it to come back ...")
+        ctx.px.wait_for_guest_agent(ctx.vmid)
+        ctx.log.info("  Guest agent responding again. Waiting %ds for OS to settle ...",
+                      ctx.effective_wait(post_seconds))
+        ctx.sleep_fn(post_seconds)

@@ -33,7 +33,7 @@ ISO_MOUNT_WAIT_SECONDS = 5         # ISO availability after mount
 PRE_REBOOT_PAUSE_SECONDS = 10      # Grace period before reboot (step 13)
 POST_REBOOT_BOOT_SECONDS = 40      # Boot after reboot (steps 13, 14)
 NIC_RESTORE_PRE_REBOOT_SECONDS = 15  # Grace period before reboot (step 14)
-REBOOT_INITIATION_SECONDS = 15     # Delay before polling after reboot command
+REBOOT_OFFLINE_TIMEOUT_SECONDS = 90  # Max wait for guest agent to go offline after reboot
 PRE_FINALIZE_SETTLE_SECONDS = 15   # Extra settle time before step 15
 VM_READY_TIMEOUT_SECONDS = 300     # Max wait for VM to reach 'running'
 VM_READY_POLL_SECONDS = 5          # Poll interval for VM ready check
@@ -66,16 +66,17 @@ class MigrationOrchestrator:
         vm_name = self.config.migration.vm_name
 
         self.log.info("=" * 60)
-        self.log.info("VMware-to-Proxmox Migration")
+        self.log.info("Starting the migration from VMware to Proxmox")
         self.log.info("  VM:                  %s", vm_name)
         self.log.info("  Migration datastore: %s", self.config.migration.migration_datastore)
         self.log.info("  Proxmox storage:     %s", self.config.migration.proxmox_storage)
+        self.log.info("  Migration method:     %s", self.config.migration.disk_conversion_backend)
         if self.config.migration.proxmox_final_storage:
             self.log.info("  Proxmox final store: %s", self.config.migration.proxmox_final_storage)
         if self.dry_run:
             self.log.info("  *** DRY RUN — no changes will be made ***")
         if self.config.migration.enable_nics_on_boot:
-            self.log.info("  NICs on boot:        enabled (reduced wait timers)")
+            self.log.info("  NICs on boot:        enabled")
         if self.config.migration.enable_ha:
             self.log.info("  HA:                  enabled")
         if self.skip_to > 1:
