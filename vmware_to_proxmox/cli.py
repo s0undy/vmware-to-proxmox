@@ -109,9 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--netapp-destination-site",
                         help="Destination site name registered in NetApp Shift")
     parser.add_argument("--netapp-destination-volume",
-                        help="Destination NetApp volume backing the qtree")
-    parser.add_argument("--netapp-destination-qtree",
-                        help="Destination QTree name for converted disks")
+                        help="Destination NetApp volume that maps to proxmox_final_storage")
 
     # Proxmox VM options
     parser.add_argument("--proxmox-vmid", type=int, default=None,

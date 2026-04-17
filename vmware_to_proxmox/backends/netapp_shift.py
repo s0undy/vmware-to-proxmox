@@ -82,18 +82,32 @@ class NetAppShiftBackend(DiskMigrationBackend):
     # ------------------------------------------------------------------
 
     def step_7_rewrite_vmdk_descriptors(self, ctx: BackendContext, vm) -> None:
-        """Step 7 (NetApp Shift): create the Resource Group."""
+        """Step 7 (NetApp Shift): create the Resource Group.
+
+        Pre-creates ``/mnt/pve/{proxmox_final_storage}/images/{vmid}`` on
+        the Proxmox node so NetApp Shift (pointed at that path via the
+        custom qtree's ``volumePath``) can write the converted qcow2 files
+        directly into their final location — no post-conversion move.
+        """
         cfg = ctx.config.migration
+        vmid = ctx.resolve_vmid()
         rg_name = f"{vm.name}-rg"
 
         if ctx.dry_run:
             ctx.log.info(
-                "  DRY RUN: would create resource group %s for VM %s "
-                "(datastore=%s, volume=%s, qtree=%s)",
-                rg_name, vm.name, cfg.proxmox_final_storage,
-                cfg.netapp_destination_volume, cfg.netapp_destination_qtree,
+                "  DRY RUN: would ensure /mnt/pve/%s/images/%d exists and "
+                "create resource group %s for VM %s (datastore=%s, volume=%s)",
+                cfg.proxmox_final_storage, vmid, rg_name, vm.name,
+                cfg.proxmox_final_storage, cfg.netapp_destination_volume,
             )
             return
+
+        # Create the target directory before the resource group so the
+        # custom-qtree volumePath references a real location. Idempotent,
+        # safe to rerun after a partial step 7 failure.
+        ctx.px.ensure_vm_image_dir(
+            vmid=vmid, final_storage=cfg.proxmox_final_storage,
+        )
 
         existing = self.client.get_resource_group_id_by_name(rg_name)
         if existing:
@@ -132,9 +146,9 @@ class NetAppShiftBackend(DiskMigrationBackend):
             dest_virt_env_id=self._dest_virt_env_id,
             vm_id=self._vm_info["_id"],
             vm_name=vm.name,
+            vmid=vmid,
             datastore_name=cfg.proxmox_final_storage,
             volume_name=cfg.netapp_destination_volume,
-            qtree_name=cfg.netapp_destination_qtree,
         )
         ctx.log.info("  Resource group created (id=%s).", self._resource_group_id)
 
@@ -286,8 +300,6 @@ class NetAppShiftBackend(DiskMigrationBackend):
             num_disks=num_disks,
             firmware=vm_config["firmware"],
             final_storage=cfg.proxmox_final_storage,
-            netapp_volume=cfg.netapp_destination_volume,
-            netapp_qtree=cfg.netapp_destination_qtree,
         )
 
         ctx.log.info("  Starting VMID %d ...", vmid)

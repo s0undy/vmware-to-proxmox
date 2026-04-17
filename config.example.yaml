@@ -86,11 +86,12 @@ migration:
 
   # NetApp Shift placement (only required when disk_conversion_backend is
   # "netapp-shift"). The destination datastore is taken from
-  # proxmox_final_storage above.
+  # proxmox_final_storage above. A "custom" qtree is used so converted
+  # qcow2 files land directly in /mnt/pve/{proxmox_final_storage}/images/{vmid}/
+  # and no post-conversion move is needed.
   # netapp_source_site: ""           # --netapp-source-site
   # netapp_destination_site: ""      # --netapp-destination-site
-  # netapp_destination_volume: ""    # --netapp-destination-volume  (NetApp volume backing the qtree)
-  # netapp_destination_qtree: ""     # --netapp-destination-qtree
+  # netapp_destination_volume: ""    # --netapp-destination-volume  (NetApp volume name that maps to proxmox_final_storage)
 
   # ---------------------------------------------------------------------------
   # VM list — specify one or more VMs to migrate.
@@ -125,7 +126,6 @@ migration:
     #   netapp_source_site: ""        # override NetApp Shift source site for this VM
     #   netapp_destination_site: ""   # override NetApp Shift destination site for this VM
     #   netapp_destination_volume: "" # override NetApp Shift destination volume for this VM
-    #   netapp_destination_qtree: ""  # override NetApp Shift destination qtree for this VM
 
 # ---------------------------------------------------------------------------
 # NetApp Shift connection (only required when

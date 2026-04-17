@@ -277,6 +277,24 @@ class ProxmoxClient:
         self.wait_for_task(upid, timeout=timeout)
         logger.info("    %s move complete.", disk)
 
+    def ensure_vm_image_dir(self, *, vmid: int, final_storage: str) -> str:
+        """Create ``/mnt/pve/{final_storage}/images/{vmid}`` on the Proxmox node.
+
+        NetApp Shift is pointed at this directory (via a custom qtree's
+        ``volumePath``) so the converted qcow2 files land directly in the
+        Proxmox dir-storage layout — no cross-filesystem move is needed
+        afterwards. The directory is created ``drwxr----- nobody:nogroup``
+        to match what Proxmox itself creates when allocating disks.
+
+        Returns the absolute path of the directory.
+        """
+        images_dir = f"/mnt/pve/{final_storage}/images/{vmid}"
+        logger.info("  Ensuring VM images directory exists: %s", images_dir)
+        self._ssh_run(f"mkdir -p {shlex.quote(images_dir)}")
+        self._ssh_run(f"chown nobody:nogroup {shlex.quote(images_dir)}")
+        self._ssh_run(f"chmod 0740 {shlex.quote(images_dir)}")
+        return images_dir
+
     def import_disks_from_netapp_shift(
         self,
         *,
@@ -285,54 +303,37 @@ class ProxmoxClient:
         num_disks: int,
         firmware: str,
         final_storage: str,
-        netapp_volume: str,
-        netapp_qtree: str,
     ) -> None:
-        """Move NetApp Shift output qcow2 files into the Proxmox images
-        directory for ``vmid`` and attach them to the VM.
+        """Rename NetApp Shift output qcow2 files in place and attach them.
 
-        Source layout produced by NetApp Shift::
+        NetApp Shift writes its output directly into the Proxmox
+        dir-storage layout (thanks to the ``custom`` qtree + explicit
+        ``volumePath`` configured at resource-group creation time)::
 
-            /mnt/pve/{netapp_volume}/{netapp_qtree}/{netapp_qtree}/{vm_name}/
+            /mnt/pve/{final_storage}/images/{vmid}/
                 {vm_name}.qcow2           # first disk
                 {vm_name}_1.qcow2         # second disk
                 {vm_name}_2.qcow2         # third disk
                 ...
 
-        Destination (Proxmox dir storage layout)::
-
-            /mnt/pve/{netapp_volume}/images/{vmid}/
-                vm-{vmid}-disk-0.qcow2
-                vm-{vmid}-disk-1.qcow2
-                ...
-
-        The destination directory is created ``drwxr----- nobody:nogroup``
-        and each moved file is set to ``-rw-r----- nobody:nogroup``.
-        After moving, each disk is attached as ``scsiN`` on the VM and
-        the boot order is set to ``order=scsi0``. For OVMF VMs, an
-        ``efidisk0`` is allocated last so it lands after the data disks
-        numerically.
+        Each file is renamed in place to ``vm-{vmid}-disk-N.qcow2``,
+        attached as ``scsiN`` on the VM, and the boot order is set to
+        ``order=scsi0``. For OVMF VMs, an ``efidisk0`` is allocated last
+        so it lands after the data disks numerically.
         """
-        node = self.config.node
-        source_dir = (
-            f"/mnt/pve/{netapp_volume}/{netapp_qtree}/"
-            f"{netapp_qtree}/{vm_name}"
-        )
-        dest_dir = f"/mnt/pve/{netapp_volume}/images/{vmid}"
+        images_dir = f"/mnt/pve/{final_storage}/images/{vmid}"
 
         try:
-            # 1. Destination directory with drwxr----- nobody:nogroup.
-            logger.info("  Preparing destination directory %s", dest_dir)
-            self._ssh_run(f"mkdir -p {shlex.quote(dest_dir)}")
-            self._ssh_run(f"chown nobody:nogroup {shlex.quote(dest_dir)}")
-            self._ssh_run(f"chmod 0740 {shlex.quote(dest_dir)}")
+            # 1. Directory should already exist from step 7, but make it
+            #    idempotent so --skip-to 10 works after manual conversion.
+            self.ensure_vm_image_dir(vmid=vmid, final_storage=final_storage)
 
-            # 2. Move + rename each disk (idempotent).
+            # 2. Rename each disk in place (idempotent).
             for i in range(num_disks):
                 src_name = f"{vm_name}.qcow2" if i == 0 else f"{vm_name}_{i}.qcow2"
                 dest_name = f"vm-{vmid}-disk-{i}.qcow2"
-                src_path = f"{source_dir}/{src_name}"
-                dest_path = f"{dest_dir}/{dest_name}"
+                src_path = f"{images_dir}/{src_name}"
+                dest_path = f"{images_dir}/{dest_name}"
 
                 _, _, src_rc = self._ssh_run(
                     f"test -f {shlex.quote(src_path)}", check=False,
@@ -343,12 +344,12 @@ class ProxmoxClient:
 
                 if dest_rc == 0 and src_rc != 0:
                     logger.info(
-                        "    [%d/%d] %s already in place — skipping move.",
+                        "    [%d/%d] %s already renamed — skipping.",
                         i + 1, num_disks, dest_name,
                     )
                 elif src_rc == 0 and dest_rc != 0:
                     logger.info(
-                        "    [%d/%d] Moving %s -> %s ...",
+                        "    [%d/%d] Renaming %s -> %s ...",
                         i + 1, num_disks, src_name, dest_name,
                     )
                     self._ssh_run(
@@ -372,19 +373,15 @@ class ProxmoxClient:
             #    which avoids the qemu-img info hang that occurs through the API.
             logger.info("  Attaching %d disk(s) to VMID %d ...", num_disks, vmid)
             for i in range(num_disks):
-                dest_path = f"{dest_dir}/vm-{vmid}-disk-{i}.qcow2"
+                dest_path = f"{images_dir}/vm-{vmid}-disk-{i}.qcow2"
                 logger.info(
                     "    [%d/%d] Verifying %s is accessible ...",
                     i + 1, num_disks, dest_path,
                 )
                 self._wait_for_file(dest_path)
                 logger.info(
-                    "    [%d/%d] File visible, waiting 30s for storage to settle ...",
-                    i + 1, num_disks,
-                )
-                time.sleep(30)
-                logger.info(
-                    "    [%d/%d] Verifying disk is readable via qemu-img info ...",
+                    "    [%d/%d] File visible, verifying disk is readable "
+                    "via qemu-img info ...",
                     i + 1, num_disks,
                 )
                 self._wait_for_qemu_img(dest_path)
