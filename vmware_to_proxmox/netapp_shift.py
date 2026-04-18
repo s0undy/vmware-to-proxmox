@@ -217,7 +217,8 @@ class NetAppShiftClient:
         volume_name: str,
         boot_order: int = 3,
     ) -> str:
-        # Using a "custom" qtree with an explicit volumePath tells NetApp
+        # Using a custom allows for bypassing
+        # the need for a qtree with an explicit volumePath tells NetApp
         # Shift to write the converted qcow2 files directly into the
         # Proxmox dir-storage layout (/mnt/pve/{datastore}/images/{vmid}/).
         # The caller must have created that directory on the Proxmox node
