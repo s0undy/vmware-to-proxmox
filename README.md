@@ -141,4 +141,4 @@ Sequential by default. Use `--parallel` for concurrent migration.
 
 This project was built with assistance from AI. AI makes mistakes — and so do humans. Always have working backups before migrating and verify they work. Do a trial run with `--dry-run` and `--skip-to` before running on production workloads.
 
-YMMV & DYODD — *C'est la vie.*
+YMMV
