@@ -30,6 +30,15 @@ SOURCE_DISCOVERY_SETTLE_SECONDS = 30
 class NetAppShiftBackend(DiskMigrationBackend):
     name = "netapp-shift"
 
+    step_labels = {
+        6: "Shut down VM",
+        7: "Create NetApp Resource Group",
+        8: "Create NetApp Blueprint",
+        9: "Convert disks via NetApp Shift",
+        10: "Import converted disks into Proxmox",
+        11: "Verify VM on final storage",
+    }
+
     def __init__(self, shift_config: NetAppShiftConfig):
         self.shift_config = shift_config
         self.client: NetAppShiftClient | None = None

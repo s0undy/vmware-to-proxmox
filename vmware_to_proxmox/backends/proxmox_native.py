@@ -11,6 +11,15 @@ class ProxmoxNativeBackend(DiskMigrationBackend):
 
     name = "proxmox-native"
 
+    step_labels = {
+        6: "Shut down VM",
+        7: "Rewrite VMDK descriptors",
+        8: "Start VM in Proxmox",
+        9: "Move disks to final storage",
+        10: "Import converted disks (skipped \u2014 not used by proxmox-native)",
+        11: "Verify VM on final storage",
+    }
+
     def step_6_shutdown(self, ctx: BackendContext, vm) -> None:
         from ..migration import SHUTDOWN_SETTLE_SECONDS
 
