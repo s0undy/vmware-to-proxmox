@@ -35,6 +35,10 @@ class DiskMigrationBackend(ABC):
 
     name: str = "base"
 
+    # Console labels for the backend-owned steps (6-11). Subclasses override
+    # so the STEP N/15 banner matches what the backend actually does.
+    step_labels: dict[int, str] = {}
+
     def prepare(self, ctx: BackendContext) -> None:
         """Optional one-time setup after vCenter/Proxmox are connected."""
 

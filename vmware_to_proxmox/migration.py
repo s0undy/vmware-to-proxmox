@@ -112,18 +112,19 @@ class MigrationOrchestrator:
             self.backend.finalize(self._build_backend_context())
 
     def _run_steps(self, vm, vm_name: str, start_time: float) -> dict:
+        backend_labels = self.backend.step_labels
         steps = [
             (1, "Storage vMotion", self._step_1_storage_vmotion),
             (2, "Create Proxmox VM", self._step_2_create_proxmox_vm),
             (3, "Export NIC configuration", self._step_3_export_nic_config),
             (4, "Enable VirtIO SCSI boot driver", self._step_4_enable_vioscsi),
             (5, "Install VirtIO guest tools", self._step_5_install_virtio_tools),
-            (6, "Shut down VM", self._step_6_shutdown),
-            (7, "Rewrite VMDK descriptors", self._step_7_rewrite_vmdk_descriptors),
-            (8, "Start VM in Proxmox", self._step_8_start_vm),
-            (9, "Move disks to final storage", self._step_9_move_disks),
-            (10, "Import converted disks", self._step_10_import_disks),
-            (11, "Verify VM on final storage", self._step_11_verify),
+            (6, backend_labels.get(6, "Shut down VM"), self._step_6_shutdown),
+            (7, backend_labels.get(7, "Rewrite VMDK descriptors"), self._step_7_rewrite_vmdk_descriptors),
+            (8, backend_labels.get(8, "Start VM in Proxmox"), self._step_8_start_vm),
+            (9, backend_labels.get(9, "Move disks to final storage"), self._step_9_move_disks),
+            (10, backend_labels.get(10, "Import converted disks"), self._step_10_import_disks),
+            (11, backend_labels.get(11, "Verify VM on final storage"), self._step_11_verify),
             (12, "Install VirtIO drivers from ISO", self._step_12_install_virtio_drivers),
             (13, "Purge VMware Tools", self._step_13_purge_vmware_tools),
             (14, "Restore NIC configuration", self._step_14_import_nic_config),
