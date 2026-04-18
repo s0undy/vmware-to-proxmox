@@ -48,7 +48,7 @@ class WindowsHandler(OSHandler):
             raise GuestOperationError(
                 f"enable-vioscsi-to-load-on-boot.ps1 exited with code {exit_code}"
             )
-        logger.info("  VirtIO SCSI driver configured for boot loading.")
+        logger.info("  VirtIO SCSI driver configured.")
 
     def step_5_install_virtio_tools(self, vm, guest_ops, config, dry_run):
         guest_ops.wait_for_tools(vm)

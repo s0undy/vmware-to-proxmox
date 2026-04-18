@@ -473,6 +473,27 @@ class ProxmoxClient:
             except Exception:
                 time.sleep(5)
 
+    def wait_for_guest_agent_offline(self, vmid: int, timeout: int = 90) -> None:
+        """Block until the QEMU guest agent stops responding.
+
+        Used after issuing an in-guest reboot to confirm the OS actually
+        started going down — Proxmox continues to report the VM as 'running'
+        throughout a guest reboot, so VM status alone can't detect this.
+        """
+        node = self.config.node
+        start = time.monotonic()
+        while True:
+            elapsed = time.monotonic() - start
+            if elapsed > timeout:
+                raise ProxmoxOperationError(
+                    f"Guest agent still responding after {timeout}s for VM {vmid} — reboot may not have started"
+                )
+            try:
+                self.api.nodes(node).qemu(vmid).agent.ping.post()
+            except Exception:
+                return
+            time.sleep(2)
+
     def guest_exec(
         self,
         vmid: int,
