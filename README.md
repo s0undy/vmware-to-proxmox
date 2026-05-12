@@ -4,13 +4,14 @@
 
 <h1 align="center">Automate your VMware to Proxmox migration</h1>
 
-Automates the [Attach Disk & Move Disk (minimal downtime)](https://pve.proxmox.com/wiki/Migrate_to_Proxmox_VE#Attach_Disk_&_Move_Disk_(minimal_downtime)) migration method from the Proxmox wiki. Optionally uses [NetApp Shift Toolkit](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-overview.html#toolkit-overview) for disk conversion, which can reduce migration time by up to 99% on large VMs.
+Automates the [Attach Disk & Move Disk (minimal downtime)](https://pve.proxmox.com/wiki/Migrate_to_Proxmox_VE#Attach_Disk_&_Move_Disk_(minimal_downtime)) migration method from the Proxmox wiki. Optionally uses [NetApp Shift Toolkit](https://docs.netapp.com/us-en/netapp-solutions-virtualization/migration/shift-toolkit-overview.html#toolkit-overview) for disk conversion, which can reduce migration time by up to 90% on large VMs.
 
-The base method has been used to migrate 80+ VMs from VMware to Proxmox, ranging from 20GB to 5TB in size. The NetApp Shift–based version has been used so far to migrate 30+ VMs, ranging from 20GB to 5TB.
+
+Both the base method and NetApp Shift-based version has been used to migrate over 150+ VMs in sizes ranging from 20GB to 5TB.
 
 ## Migration steps
 
-The migration is done in 15 distinct steps.
+The script is split up into different steps that differs some depending on configuration.
 
 **Base method:**
 
@@ -30,7 +31,7 @@ The migration is done in 15 distinct steps.
 14. Restore NIC configuration
 15. Enable NICs and do a final reboot
 
-**NetApp Shift method** (steps 7–10 replaced):
+**NetApp Shift method** (replaces steps 7–10 in base method):
 
 1. Storage vMotion VM to a shared datastore
 2. VM creation in Proxmox
@@ -56,7 +57,7 @@ The migration is done in 15 distinct steps.
 - PowerShell scripts (`exportNicConfig.ps1`, `enable-vioscsi-to-load-on-boot.ps1`, `importNicConfig.ps1`, `purge-vmware-tools.ps1`) in the same directory
 - VirtIO ISO uploaded to Proxmox storage
 - The same NFS volume mounted on both Proxmox and in vCenter (can be a temporary migration volume)
-- A "final" destination volume in Proxmox
+- A "final" destination volume in Proxmox (Should not be the same as the volume above)
 
 ### Additional requirements for NetApp Shift
 
@@ -65,7 +66,7 @@ The migration is done in 15 distinct steps.
 - All ONTAP arrays that will be used added as storage to vCenter inside Shift
 - KVM (Conversion) setup as a source destination inside Shift
 - NFS volume mounted on Proxmox
-- The same NFS volume mounted inside vCenter
+- The same NFS volume mounted inside vCenter(This must be the same as above)
 
 ## Install
 
@@ -124,7 +125,7 @@ migration:
       enable_ha: true
 ```
 
-Sequential by default. Use `--parallel` for concurrent migration.
+Sequential by default. Use `--parallel` for concurrent migration. Depending on what storage is being used remember that a VM migration causes heavy load on the target storage. I recommend running max 2-4 VMs in parallel, but prefer to run them in sequence.
 
 ## Known issues
 
@@ -133,7 +134,7 @@ Sequential by default. Use `--parallel` for concurrent migration.
 ## Credits
 
 - `enable-vioscsi-to-load-on-boot.ps1` — [croit/derhanns](https://github.com/croit/load-virtio-scsi-on-boot)
-- `importNicConfig.ps1` & `exportNicConfigs.ps1` — [lucavornheder](https://forum.proxmox.com/threads/netzwerksettings-bei-der-migration-von-windows-vms-zu-pve-%C3%BCbernehmen.175997/)
+- `importNicConfig.ps1` & `exportNicConfig.ps1` — [lucavornheder](https://forum.proxmox.com/threads/netzwerksettings-bei-der-migration-von-windows-vms-zu-pve-%C3%BCbernehmen.175997/)
 - `purge-vmware-tools.ps1` — [community gist](https://gist.github.com/broestls/f872872a00acee2fca02017160840624)
 - NetApp for their Shift Toolkit and examples at [shift-api-automation](https://github.com/NetApp/shift-api-automation)
 
