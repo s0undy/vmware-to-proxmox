@@ -60,6 +60,7 @@ class MigrationConfig:
     start_vm_before_move: bool = True
     enable_nics_on_boot: bool = False
     enable_ha: bool = False
+    resource_pool: str = ""
     proxmox_vmid: int = 0
     proxmox_bridges: str = "vmbr0"
     cpu_type: str = "host"
@@ -228,6 +229,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
     enable_ha = bool(_pick(
         args.enable_ha, mig_yaml.get("enable_ha"), False
     ))
+    resource_pool = mig_yaml.get("resource_pool", "")
     if not migration_ds:
         raise ConfigurationError("--migration-datastore is required")
     if not px_storage:
@@ -350,6 +352,7 @@ def load_config(args, yaml_data: dict | None = None) -> tuple[list["AppConfig"],
         start_vm_before_move=start_vm_before_move,
         enable_nics_on_boot=enable_nics_on_boot,
         enable_ha=enable_ha,
+        resource_pool=resource_pool,
         proxmox_vmid=0,
         proxmox_bridges=px_bridges,
         cpu_type=cpu_type,

@@ -239,6 +239,8 @@ class MigrationOrchestrator:
         self.log.info("  CPU type: %s", cpu_display)
         self.log.info("  Memory:   %d MB", vm_config["memory_mb"])
         self.log.info("  Firmware: %s", vm_config["firmware"])
+        if self.config.migration.resource_pool:
+            self.log.info("  Pool:     %s", self.config.migration.resource_pool)
         for i, d in enumerate(vm_config["disks"]):
             self.log.info("  Disk scsi%d: %.1f GB  (%s)", i, d["size_gb"], d["label"])
         for i, n in enumerate(vm_config["nics"]):
