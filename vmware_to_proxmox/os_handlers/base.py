@@ -34,6 +34,16 @@ class OSHandler(ABC):
         """Human-readable OS label for logging (e.g., 'Windows', 'Ubuntu')."""
         ...
 
+    @property
+    def expects_guest_agent(self) -> bool:
+        """Whether the QEMU guest agent is expected to be running in the guest.
+
+        Handlers that install/rely on the agent return True. Handlers for
+        OS types where no agent is present (e.g. appliances) return False so
+        the orchestrator can skip agent pings instead of waiting for a timeout.
+        """
+        return True
+
     @abstractmethod
     def step_3_export_nic_config(self, vm, guest_ops, config, dry_run: bool) -> None:
         """Export NIC configuration from the guest before migration."""

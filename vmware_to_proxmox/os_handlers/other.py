@@ -13,6 +13,12 @@ class OtherHandler(OSHandler):
     def os_label(self) -> str:
         return "Other/Appliance"
 
+    @property
+    def expects_guest_agent(self) -> bool:
+        # OS type 'other' makes no assumptions about a QEMU guest agent being
+        # present, so callers must not wait for it to ping back.
+        return False
+
     def step_3_export_nic_config(self, vm, guest_ops, config, dry_run):
         logger.info("  Skipped — OS type is 'other'.")
 
