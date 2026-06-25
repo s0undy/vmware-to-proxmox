@@ -147,6 +147,10 @@ class ProxmoxClient:
         if not skip_data_disks:
             params["boot"] = "order=scsi0"
 
+        # Optional resource pool — the pool must already exist in Proxmox.
+        if migration_config.resource_pool:
+            params["pool"] = migration_config.resource_pool
+
         # Disks — preserve order from vCenter
         if skip_data_disks:
             logger.info(

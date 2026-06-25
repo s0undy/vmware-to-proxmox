@@ -103,6 +103,7 @@ migration:
   # ---------------------------------------------------------------------------
   vms:
     - vm_name: ""                    # required
+      resource_pool: ""             # optional: add the VM to an existing Proxmox resource pool
       proxmox_vmid:                 # 0 = next available
       proxmox_bridges: "vmbr0"
       proxmox_final_storage: ""     # override final storage for this VM
@@ -112,6 +113,7 @@ migration:
       max_sockets: 1
       enable_ha: false
     # - vm_name: ""
+    #   resource_pool: "production"  # add this VM to an existing Proxmox resource pool
     #   proxmox_vmid: 0
     #   proxmox_bridges: "vmbr1"     # override bridge for this VM
     #   proxmox_final_storage: ""    # override final storage for this VM
