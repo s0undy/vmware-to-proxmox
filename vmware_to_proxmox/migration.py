@@ -162,17 +162,24 @@ class MigrationOrchestrator:
                     self.log.warning("  You can add it manually: ha-manager add vm:%d", vmid)
 
         # Query guest agent for primary IP address (skip when HA is enabled
-        # because Proxmox may migrate the VM to another node after enrollment)
+        # because Proxmox may migrate the VM to another node after enrollment,
+        # and skip when the OS type has no guest agent to ping back)
         ip_address = None
         if not self.dry_run and not self.config.migration.enable_ha:
-            vmid = self._resolve_vmid()
-            self._wait_for_vm_ready(vmid)
-            self.log.info("  Waiting for QEMU guest agent ...")
-            try:
-                self.px.wait_for_guest_agent(vmid)
-                ip_address = self.px.get_guest_ip(vmid)
-            except (ProxmoxOperationError, ProxmoxConnectionError, OSError):
-                self.log.warning("  Could not retrieve IP from guest agent.")
+            if not self.os_handler.expects_guest_agent:
+                self.log.info(
+                    "  Skipping guest agent IP query — OS type '%s' has no QEMU guest agent.",
+                    self.os_handler.os_label,
+                )
+            else:
+                vmid = self._resolve_vmid()
+                self._wait_for_vm_ready(vmid)
+                self.log.info("  Waiting for QEMU guest agent ...")
+                try:
+                    self.px.wait_for_guest_agent(vmid)
+                    ip_address = self.px.get_guest_ip(vmid)
+                except (ProxmoxOperationError, ProxmoxConnectionError, OSError):
+                    self.log.warning("  Could not retrieve IP from guest agent.")
 
         elapsed = time.monotonic() - start_time
         minutes, seconds = divmod(int(elapsed), 60)
